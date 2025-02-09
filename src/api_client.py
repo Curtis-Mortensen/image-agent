@@ -11,6 +11,8 @@ from aiohttp import ClientTimeout
 from tenacity import retry, stop_after_attempt, wait_exponential
 import fal_client
 
+from config import DEFAULT_NUM_INFERENCE_STEPS, DEFAULT_NEGATIVE_PROMPT, DEFAULT_GUIDANCE_SCALE, IMAGE_SIZE  # Import config values
+
 logger = logging.getLogger(__name__)
 
 class FalClient:
@@ -19,7 +21,7 @@ class FalClient:
     def __init__(self, api_key: str, timeout: int = 60):
         self.api_key = api_key
         self.timeout = timeout
-        fal_client.api_key = api_key
+        fal_client.api_key = api_key # Ensure api_key is set here
 
     async def setup(self):
         """Initialize the client."""
@@ -55,12 +57,14 @@ class FalClient:
             # Prepare generation parameters
             arguments = {
                 "prompt": prompt,
-                "negative_prompt": kwargs.get('negative_prompt', "blurry, low quality, distorted, deformed"),
-                "num_inference_steps": kwargs.get('num_inference_steps', 30),
-                "guidance_scale": kwargs.get('guidance_scale', 7.5),
-                "width": kwargs.get('width', 1024),
-                "height": kwargs.get('height', 1024),
+                "negative_prompt": kwargs.get('negative_prompt', DEFAULT_NEGATIVE_PROMPT), # Use config value
+                "num_inference_steps": kwargs.get('num_inference_steps', DEFAULT_NUM_INFERENCE_STEPS),
+                "guidance_scale": kwargs.get('guidance_scale', DEFAULT_GUIDANCE_SCALE), # Use config value
+                "width": kwargs.get('width', IMAGE_SIZE[0]), # Use config value
+                "height": kwargs.get('height', IMAGE_SIZE[1]), # Use config value
             }
+
+            logger.debug(f"Generating image with num_inference_steps: {arguments['num_inference_steps']}")
 
             # Use asyncio to run the synchronous fal_client in a thread pool
             loop = asyncio.get_event_loop()
