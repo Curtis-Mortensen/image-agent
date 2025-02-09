@@ -5,23 +5,31 @@ import json
 import asyncio
 from typing import Optional, Dict, Any
 from pathlib import Path
+from PIL import Image
+import backoff
+from aiohttp import ClientTimeout
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
 class FalClient:
     """Client for interacting with the fal.ai API."""
     
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, timeout: int = 60):
         self.api_key = api_key
         self.base_url = "https://110602490-fast-sdxl.fal.run"
+        self.timeout = ClientTimeout(total=timeout)
         self.session: Optional[aiohttp.ClientSession] = None
-        self.max_retries = 3
-        self.retry_delay = 60  # seconds
 
     async def setup(self):
-        """Initialize the aiohttp session."""
+        """Initialize the aiohttp session with connection pooling."""
         if not self.session:
-            self.session = aiohttp.ClientSession()
+            connector = aiohttp.TCPConnector(limit=10, force_close=False)
+            self.session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=self.timeout,
+                headers={"Authorization": f"Key {self.api_key}"}
+            )
 
     async def cleanup(self):
         """Close the aiohttp session."""
@@ -29,9 +37,14 @@ class FalClient:
             await self.session.close()
             self.session = None
 
+    @backoff.on_exception(
+        backoff.expo,
+        (aiohttp.ClientError, asyncio.TimeoutError),
+        max_tries=3
+    )
     async def generate_image(self, prompt: str, **kwargs) -> Optional[Dict[str, Any]]:
         """
-        Generate an image using fal.ai API.
+        Generate an image using fal.ai API with automatic retries.
         
         Args:
             prompt: The text prompt for image generation
@@ -43,39 +56,26 @@ class FalClient:
         if not self.session:
             await self.setup()
 
-        headers = {
-            "Authorization": f"Key {self.api_key}",
-            "Content-Type": "application/json"
-        }
-
         payload = {
             "prompt": prompt,
             **kwargs
         }
 
-        for attempt in range(self.max_retries):
-            try:
-                async with self.session.post(
-                    f"{self.base_url}/generate",
-                    headers=headers,
-                    json=payload
-                ) as response:
-                    if response.status == 429:  # Rate limit
-                        logger.warning(f"Rate limit hit, waiting {self.retry_delay} seconds...")
-                        await asyncio.sleep(self.retry_delay)
-                        continue
-                        
-                    response.raise_for_status()
-                    return await response.json()
-                    
-            except aiohttp.ClientError as e:
-                logger.error(f"API request failed (attempt {attempt + 1}/{self.max_retries}): {str(e)}")
-                if attempt < self.max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
-                continue
-                
-        logger.error("Max retries exceeded for image generation")
-        return None
+        try:
+            async with self.session.post(
+                f"{self.base_url}/generate",
+                json=payload,
+                raise_for_status=True
+            ) as response:
+                return await response.json()
+
+        except aiohttp.ClientResponseError as e:
+            if e.status == 429:  # Rate limit
+                retry_after = int(e.headers.get('Retry-After', 60))
+                logger.warning(f"Rate limit hit, waiting {retry_after} seconds...")
+                await asyncio.sleep(retry_after)
+                return await self.generate_image(prompt, **kwargs)
+            raise
 
 class GeminiClient:
     """Client for interacting with Google's Gemini API."""
@@ -85,10 +85,22 @@ class GeminiClient:
         genai.configure(api_key=api_key)
         self.vision_model = genai.GenerativeModel('gemini-pro-vision')
         self.text_model = genai.GenerativeModel('gemini-pro')
+        
+        # Configure safety settings
+        self.safety_settings = {
+            "HARM_CATEGORY_HARASSMENT": "BLOCK_NONE",
+            "HARM_CATEGORY_HATE_SPEECH": "BLOCK_NONE",
+            "HARM_CATEGORY_SEXUALLY_EXPLICIT": "BLOCK_NONE",
+            "HARM_CATEGORY_DANGEROUS_CONTENT": "BLOCK_NONE",
+        }
 
-    async def evaluate_image(self, image) -> Optional[Dict[str, Any]]:
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10)
+    )
+    async def evaluate_image(self, image: Image.Image) -> Optional[Dict[str, Any]]:
         """
-        Evaluate an image using Gemini Vision API.
+        Evaluate an image using Gemini Vision API with automatic retries.
         
         Args:
             image: PIL Image object to evaluate
@@ -113,13 +125,14 @@ class GeminiClient:
             }
             """
 
-            response = await self.vision_model.generate_content([evaluation_prompt, image])
+            response = await self.vision_model.generate_content(
+                [evaluation_prompt, image],
+                safety_settings=self.safety_settings
+            )
             
             try:
-                # Attempt to parse response as JSON
                 return json.loads(response.text)
             except json.JSONDecodeError:
-                # Fallback structure if response isn't valid JSON
                 return {
                     "quality": response.text,
                     "coherence": None,
@@ -129,11 +142,15 @@ class GeminiClient:
 
         except Exception as e:
             logger.error(f"Error evaluating image with Gemini: {str(e)}")
-            return None
+            raise
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10)
+    )
     async def refine_prompt(self, original_prompt: str, evaluation: Dict[str, Any]) -> Optional[str]:
         """
-        Generate a refined prompt based on evaluation feedback.
+        Generate a refined prompt based on evaluation feedback with automatic retries.
         
         Args:
             original_prompt: The original image generation prompt
@@ -156,9 +173,20 @@ class GeminiClient:
             Return only the refined prompt text, without any additional explanation.
             """
 
-            response = await self.text_model.generate_content(refinement_prompt)
+            response = await self.text_model.generate_content(
+                refinement_prompt,
+                safety_settings=self.safety_settings
+            )
             return response.text.strip()
 
         except Exception as e:
             logger.error(f"Error refining prompt with Gemini: {str(e)}")
-            return None
+            raise
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        pass  # Cleanup if needed

@@ -1,214 +1,199 @@
-# AI Image Generation Batch Processor Project Description
+# AI Image Generation Pipeline - Development Notes
 
-This project is a Python-based batch processing system for AI image generation that automates the creation and refinement of AI-generated images. Here's the core concept:
+## Architecture Overview
 
-## Project Purpose
-The system takes a collection of image prompts (with context like scene descriptions, moods, and titles) and automatically:
-1. Generates images using the fal.ai API
-2. Evaluates the results using Google's Gemini Vision API
-3. Creates a refined prompt based on the evaluation
-4. Generates a second iteration of the image
-5. Saves all results, including original prompts, generated images, evaluations, and refined prompts
+### Core Components
 
-## Architecture & Standards
-
-### Async/Sync Standards
-- All API interactions (fal.ai, Gemini) are async
-- File I/O operations remain synchronous (no async benefit)
-- Main execution flow is async for concurrent processing
-- Batch processing uses asyncio.gather for parallel execution
-- Signal handlers are synchronous (OS requirement)
-
-### Class Structure
 1. **ImageGenerationPipeline** (main.py)
-   - Orchestrates overall process
-   - Handles batch processing
-   - Manages graceful shutdown
-   - Coordinates between components
+   - Rich progress tracking with visual feedback
+   - CLI interface with click
+   - Process pool for CPU-intensive tasks
+   - Graceful shutdown handling
+   - Async context management
 
 2. **ImageGenerator** (image_generator.py)
-   - Handles image generation logic
-   - Manages API client interactions
-   - Coordinates evaluation and refinement
-   - Async methods for API operations
+   - Async image generation and processing
+   - ThreadPoolExecutor for image operations
+   - Enhanced error handling and retries
+   - Structured metadata management
 
 3. **PromptHandler** (prompt_handler.py)
-   - Manages prompt loading and validation
-   - Handles result saving
-   - Synchronous file operations
-   - Maintains output organization
+   - Async file operations with aiofiles
+   - JSON schema validation
+   - YAML support for flexible data storage
+   - Dataclass-based prompt validation
 
 4. **API Clients** (api_client.py)
-   - FalClient: Handles fal.ai API interactions
-   - GeminiClient: Manages Gemini API operations
-   - Async methods for API calls
-   - Handles rate limiting and retries
+   - Robust retry mechanisms with backoff
+   - Connection pooling
+   - Comprehensive error handling
+   - Async context managers
 
-### Error Handling Standards
-1. **API Errors**
-   - Retry logic for transient failures
-   - Rate limit handling with exponential backoff
-   - Detailed error logging
-   - Graceful degradation
+## New Features and Improvements
 
-2. **File Operations**
-   - Path existence checks
-   - Permission validation
-   - Atomic write operations where possible
-   - Detailed error messages
+### 1. Enhanced Progress Tracking
+- Rich progress bars and spinners
+- Real-time status updates
+- Visual task progression
+- Batch completion statistics
 
-3. **Data Validation**
-   - Input prompt validation
-   - Data structure verification
-   - Type checking
-   - Required field validation
+### 2. Improved Error Handling
+- Rich tracebacks
+- Structured logging
+- Error recovery mechanisms
+- Graceful degradation
 
-### Logging Standards
-- Hierarchical logger setup
-- Both file and console logging
-- Structured log format
-- Different log levels for different purposes
-- Timestamp in log filename
+### 3. Resource Management
+- Process pools for CPU tasks
+- Thread pools for I/O
+- Async context managers
+- Proper cleanup
 
-## Input Format
-The system accepts JSON files containing prompts structured like this:
-```json
-{
-    "prompts": [
-        {
-            "id": "scene_001",
-            "title": "Forest Awakening",
-            "scene": "Deep in a mystical forest",
-            "mood": "Ethereal, peaceful",
-            "prompt": "A shaft of golden morning light piercing through misty ancient trees"
-        }
-    ]
-}
+### 4. Data Validation
+- JSON schema validation
+- Dataclass-based structures
+- Type hints throughout
+- Input sanitization
+
+### 5. File Operations
+- Async file handling
+- Atomic writes
+- Multiple format support (JSON/YAML)
+- Structured output organization
+
+### 6. CLI Support
+- Command-line interface
+- Configuration options
+- Runtime parameters
+- Usage help
+
+## Dependencies
+
+```python
+# Core Dependencies
+aiohttp>=3.8.0        # Async HTTP
+Pillow>=10.0.0        # Image processing
+google-generativeai>=0.3.0  # Gemini API
+python-dotenv>=1.0.0  # Environment management
+
+# Enhanced Functionality
+click>=8.0.0          # CLI support
+rich>=10.0.0          # Progress/Console
+aiofiles>=0.8.0       # Async files
+pyyaml>=6.0.0         # YAML support
+jsonschema>=4.0.0     # Schema validation
+
+# Reliability
+backoff>=2.2.0        # Retry mechanism
+tenacity>=8.0.0       # Retry policies
 ```
 
+## Configuration
+
+### Environment Variables
+- FAL_AI_API_KEY
+- GEMINI_API_KEY
+- LOG_LEVEL
+- RUN_ID
+
+### Runtime Configuration
+- Batch size
+- Worker pools
+- Retry policies
+- Output formats
+
 ## Output Structure
+
 ```
 outputs/
 └── results/
     └── prompt_id/
         ├── iteration_1.png
         ├── iteration_1_results.json
+        ├── iteration_1_results.yaml
         ├── iteration_1_evaluation.json
         ├── iteration_2.png
         ├── iteration_2_results.json
+        ├── iteration_2_results.yaml
         └── summary.json
 ```
 
-## Key Implementation Details
+## Best Practices
 
-### Batch Processing
-- Default batch size: 3 concurrent operations
-- Configurable through ImageGenerator.BATCH_SIZE
-- Uses asyncio.gather for parallel execution
-- Maintains task list for cleanup
+### 1. Async Operations
+- Use aiofiles for file operations
+- Implement async context managers
+- Handle cancellation properly
+- Pool connections appropriately
 
-### Resource Management
-- Proper async context management
-- Cleanup in finally blocks
-- Signal handler for graceful shutdown
-- Task cancellation handling
+### 2. Resource Management
+- Use process pools for CPU tasks
+- Use thread pools for I/O
+- Implement proper cleanup
+- Handle signals gracefully
 
-### API Integration
-1. **FAL.ai Integration**
-   - Async HTTP requests
-   - Rate limit handling
-   - Retry mechanism
-   - Error handling
+### 3. Error Handling
+- Implement retry mechanisms
+- Log structured errors
+- Provide rich tracebacks
+- Handle edge cases
 
-2. **Gemini Integration**
-   - Vision API for evaluation
-   - Text API for prompt refinement
-   - Async operation handling
-   - Response parsing
+### 4. Data Management
+- Validate input data
+- Use structured classes
+- Implement atomic writes
+- Maintain audit trails
 
-### File Management
-- Organized directory structure
-- Atomic write operations
-- JSON for metadata storage
-- Summary file maintenance
+## Usage Examples
 
-### Performance Considerations
-- Batch processing for optimal throughput
-- Concurrent API calls
-- Efficient resource cleanup
-- Memory management
-
-## Technical Requirements
-- Python 3.7+
-- Async/await support
-- JSON processing
-- Image handling
-- HTTP client support
-
-## Dependencies
-```python
-aiohttp        # Async HTTP client
-Pillow         # Image processing
-google.generativeai  # Gemini API
+### Basic Usage
+```bash
+python -m src.main
 ```
 
-## Error Handling Strategy
-1. **API Errors**
-   - Retry with exponential backoff
-   - Rate limit handling
-   - Error logging
-   - Graceful degradation
+### CLI Options
+```bash
+python -m src.main --input-file custom_prompts.json --output-dir custom_output --batch-size 5
+```
 
-2. **File Operations**
-   - Path validation
-   - Permission checks
-   - Atomic operations
-   - Error reporting
+### Environment Setup
+```bash
+cp .env.local.example .env.local
+# Edit .env.local with your API keys
+```
 
-3. **Data Validation**
-   - Schema validation
-   - Type checking
-   - Required fields
-   - Format verification
+## Monitoring and Debugging
 
-## Logging Strategy
-1. **Levels**
-   - ERROR: Operation failures
-   - WARNING: Non-critical issues
-   - INFO: Operation progress
-   - DEBUG: Detailed information
+### Logging
+- Console output with rich formatting
+- File logging with timestamps
+- Structured log levels
+- Traceback support
 
-2. **Format**
-   ```
-   %(asctime)s - %(name)s - %(levelname)s - %(message)s
-   ```
+### Progress Tracking
+- Visual progress bars
+- Task status updates
+- Batch statistics
+- Error reporting
 
-3. **Output**
-   - Console output
-   - File logging
-   - Timestamp in filename
+## Future Improvements
 
-## Best Practices
-1. **Code Organization**
-   - Clear class responsibilities
-   - Proper error handling
-   - Comprehensive logging
-   - Type hints
+1. **Scalability**
+   - Distributed processing
+   - Queue system integration
+   - Cloud storage support
 
-2. **Resource Management**
-   - Proper cleanup
-   - Signal handling
-   - Task management
-   - Memory efficiency
+2. **Monitoring**
+   - Metrics collection
+   - Performance tracking
+   - Resource usage monitoring
 
-3. **API Integration**
-   - Rate limit respect
-   - Retry logic
-   - Error handling
-   - Response validation
+3. **Integration**
+   - Additional AI models
+   - Alternative storage backends
+   - Web interface
 
-4. **File Operations**
-   - Safe write operations
-   - Directory management
-   - Path handling
-   - Error checking
+4. **Features**
+   - Image comparison tools
+   - Quality metrics
+   - Automated optimization

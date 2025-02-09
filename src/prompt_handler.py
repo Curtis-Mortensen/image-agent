@@ -3,11 +3,53 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional, Any
 from datetime import datetime
+import aiofiles
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import aiofiles.os
+import yaml  # for flexible config handling
+from dataclasses import dataclass, asdict
+from jsonschema import validate, ValidationError
 
 logger = logging.getLogger(__name__)
 
+@dataclass
+class PromptData:
+    """Data class for structured prompt data."""
+    id: str
+    title: str
+    scene: str
+    mood: str
+    prompt: str
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, str]) -> 'PromptData':
+        return cls(**data)
+
 class PromptHandler:
-    """Handles loading prompts and saving generation results."""
+    """Handles loading prompts and saving generation results with async support."""
+
+    # JSON schema for prompt validation
+    PROMPT_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "prompts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "title": {"type": "string"},
+                        "scene": {"type": "string"},
+                        "mood": {"type": "string"},
+                        "prompt": {"type": "string"}
+                    },
+                    "required": ["title", "scene", "mood", "prompt"]
+                }
+            }
+        },
+        "required": ["prompts"]
+    }
 
     def __init__(self, input_file_path: Path, output_base_path: Path):
         """
@@ -20,7 +62,16 @@ class PromptHandler:
         self.input_file_path = Path(input_file_path)
         self.output_base_path = Path(output_base_path)
         self.results_path = self.output_base_path / "results"
-        self.results_path.mkdir(parents=True, exist_ok=True)
+        self.executor = ThreadPoolExecutor(max_workers=4)
+        self.prompts_cache: Dict[str, PromptData] = {}
+
+    async def setup(self):
+        """Initialize resources and create necessary directories."""
+        await aiofiles.os.makedirs(self.results_path, exist_ok=True)
+
+    async def cleanup(self):
+        """Cleanup resources."""
+        self.executor.shutdown(wait=True)
 
     def _validate_prompt(self, prompt_id: str, prompt_data: Dict) -> bool:
         """
@@ -33,49 +84,43 @@ class PromptHandler:
         Returns:
             bool indicating if prompt is valid
         """
-        required_fields = ['title', 'scene', 'mood', 'prompt']
-        
-        for field in required_fields:
-            if field not in prompt_data:
-                logger.error(f"Prompt {prompt_id} missing required field: {field}")
-                return False
-            
-            if not isinstance(prompt_data[field], str):
-                logger.error(f"Prompt {prompt_id} field {field} must be string")
-                return False
-            
-            if not prompt_data[field].strip():
-                logger.error(f"Prompt {prompt_id} field {field} cannot be empty")
-                return False
-                
-        return True
+        try:
+            # Convert to PromptData for validation
+            PromptData.from_dict(prompt_data)
+            return True
+        except (ValidationError, KeyError) as e:
+            logger.error(f"Invalid prompt data for {prompt_id}: {str(e)}")
+            return False
 
-    def load_prompts(self) -> Dict[str, Dict[str, str]]:
+    async def load_prompts(self) -> Dict[str, Dict[str, str]]:
         """
-        Load and validate prompts from input JSON file.
+        Load and validate prompts from input JSON file asynchronously.
         
         Returns:
             Dictionary mapping prompt IDs to prompt data
         """
         try:
-            if not self.input_file_path.exists():
+            if not await aiofiles.os.path.exists(self.input_file_path):
                 raise FileNotFoundError(f"Input file not found: {self.input_file_path}")
 
-            with open(self.input_file_path, 'r') as f:
-                data = json.load(f)
+            async with aiofiles.open(self.input_file_path, 'r') as f:
+                content = await f.read()
+                data = json.loads(content)
 
-            if not isinstance(data, dict) or 'prompts' not in data:
-                raise ValueError("Input JSON must contain 'prompts' key")
+            try:
+                validate(instance=data, schema=self.PROMPT_SCHEMA)
+            except ValidationError as e:
+                logger.error(f"Invalid prompt file structure: {str(e)}")
+                return {}
 
             prompts = {}
             for idx, prompt_data in enumerate(data['prompts'], 1):
-                # Generate ID if not provided
                 prompt_id = str(prompt_data.get('id', f'prompt_{idx:03d}'))
                 
                 if self._validate_prompt(prompt_id, prompt_data):
                     prompts[prompt_id] = prompt_data
-                else:
-                    logger.warning(f"Skipping invalid prompt: {prompt_id}")
+                    # Cache the validated prompt data
+                    self.prompts_cache[prompt_id] = PromptData.from_dict(prompt_data)
 
             if not prompts:
                 logger.error("No valid prompts found in input file")
@@ -91,28 +136,20 @@ class PromptHandler:
             logger.error(f"Error loading prompts: {str(e)}")
             return {}
 
-    def _create_prompt_directory(self, prompt_id: str) -> Path:
-        """
-        Create and return directory for prompt outputs.
-        
-        Args:
-            prompt_id: Unique identifier for the prompt
-            
-        Returns:
-            Path to prompt directory
-        """
+    async def _create_prompt_directory(self, prompt_id: str) -> Path:
+        """Create and return directory for prompt outputs asynchronously."""
         prompt_dir = self.results_path / prompt_id
-        prompt_dir.mkdir(parents=True, exist_ok=True)
+        await aiofiles.os.makedirs(prompt_dir, exist_ok=True)
         return prompt_dir
 
-    def save_results(self,
-                    prompt_id: str,
-                    iteration: int,
-                    image_path: Optional[Path],
-                    prompt: str,
-                    evaluation: Optional[Dict[str, Any]] = None) -> None:
+    async def save_results(self,
+                          prompt_id: str,
+                          iteration: int,
+                          image_path: Optional[Path],
+                          prompt: str,
+                          evaluation: Optional[Dict[str, Any]] = None) -> None:
         """
-        Save generation results for a prompt iteration.
+        Save generation results for a prompt iteration asynchronously.
         
         Args:
             prompt_id: Unique identifier for the prompt
@@ -122,7 +159,7 @@ class PromptHandler:
             evaluation: Optional evaluation results
         """
         try:
-            prompt_dir = self._create_prompt_directory(prompt_id)
+            prompt_dir = await self._create_prompt_directory(prompt_id)
             
             # Prepare results data
             results = {
@@ -130,90 +167,88 @@ class PromptHandler:
                 "iteration": iteration,
                 "prompt": prompt,
                 "image_path": str(image_path) if image_path else None,
-                "evaluation": evaluation
+                "evaluation": evaluation,
+                "prompt_data": asdict(self.prompts_cache.get(prompt_id)) if prompt_id in self.prompts_cache else None
             }
 
-            # Save results JSON
-            results_file = prompt_dir / f"iteration_{iteration}_results.json"
-            with open(results_file, 'w') as f:
-                json.dump(results, f, indent=2)
+            # Save results as both JSON and YAML for flexibility
+            results_file_json = prompt_dir / f"iteration_{iteration}_results.json"
+            results_file_yaml = prompt_dir / f"iteration_{iteration}_results.yaml"
 
-            # Create iteration summary
-            self._update_summary(prompt_id, iteration, results)
+            async with aiofiles.open(results_file_json, 'w') as f:
+                await f.write(json.dumps(results, indent=2))
+
+            # Save YAML version asynchronously
+            def save_yaml():
+                with open(results_file_yaml, 'w') as f:
+                    yaml.dump(results, f, default_flow_style=False)
+
+            await asyncio.get_event_loop().run_in_executor(
+                self.executor, save_yaml
+            )
+
+            # Update summary
+            await self._update_summary(prompt_id, iteration, results)
 
             logger.debug(f"Saved results for prompt {prompt_id}, iteration {iteration}")
 
         except Exception as e:
             logger.error(f"Error saving results for prompt {prompt_id}: {str(e)}")
 
-    def _update_summary(self, prompt_id: str, iteration: int, results: Dict) -> None:
-        """
-        Update the summary file for a prompt.
-        
-        Args:
-            prompt_id: Unique identifier for the prompt
-            iteration: Iteration number
-            results: Results data to add to summary
-        """
+    async def _update_summary(self, prompt_id: str, iteration: int, results: Dict) -> None:
+        """Update the summary file for a prompt asynchronously."""
         try:
-            prompt_dir = self._create_prompt_directory(prompt_id)
+            prompt_dir = await self._create_prompt_directory(prompt_id)
             summary_file = prompt_dir / "summary.json"
             
             # Load existing summary or create new
-            if summary_file.exists():
-                with open(summary_file, 'r') as f:
-                    summary = json.load(f)
-            else:
-                summary = {
-                    "prompt_id": prompt_id,
-                    "iterations": {},
-                    "last_updated": None
-                }
+            summary = {"prompt_id": prompt_id, "iterations": {}, "last_updated": None}
+            if await aiofiles.os.path.exists(summary_file):
+                async with aiofiles.open(summary_file, 'r') as f:
+                    content = await f.read()
+                    summary = json.loads(content)
 
             # Update summary with new iteration
             summary["iterations"][str(iteration)] = {
                 "timestamp": results["timestamp"],
                 "image_path": results["image_path"],
-                "has_evaluation": bool(results.get("evaluation"))
+                "has_evaluation": bool(results.get("evaluation")),
+                "status": "completed" if results.get("evaluation") else "generated"
             }
             summary["last_updated"] = datetime.now().isoformat()
+            summary["total_iterations"] = len(summary["iterations"])
 
             # Save updated summary
-            with open(summary_file, 'w') as f:
-                json.dump(summary, f, indent=2)
+            async with aiofiles.open(summary_file, 'w') as f:
+                await f.write(json.dumps(summary, indent=2))
 
         except Exception as e:
             logger.error(f"Error updating summary for prompt {prompt_id}: {str(e)}")
 
-    def get_generation_status(self, prompt_id: str) -> Dict[str, Any]:
-        """
-        Get the current generation status for a prompt.
-        
-        Args:
-            prompt_id: Unique identifier for the prompt
-            
-        Returns:
-            Dictionary containing generation status
-        """
+    async def get_generation_status(self, prompt_id: str) -> Dict[str, Any]:
+        """Get the current generation status for a prompt asynchronously."""
         try:
             prompt_dir = self.results_path / prompt_id
             summary_file = prompt_dir / "summary.json"
             
-            if not summary_file.exists():
+            if not await aiofiles.os.path.exists(summary_file):
                 return {
                     "prompt_id": prompt_id,
                     "status": "not_started",
-                    "iterations_completed": 0
+                    "iterations_completed": 0,
+                    "prompt_data": asdict(self.prompts_cache.get(prompt_id)) if prompt_id in self.prompts_cache else None
                 }
 
-            with open(summary_file, 'r') as f:
-                summary = json.load(f)
+            async with aiofiles.open(summary_file, 'r') as f:
+                content = await f.read()
+                summary = json.loads(content)
 
             return {
                 "prompt_id": prompt_id,
                 "status": "completed" if len(summary["iterations"]) >= 2 else "in_progress",
                 "iterations_completed": len(summary["iterations"]),
-                "last_updated": summary["last_updated"]
+                "last_updated": summary["last_updated"],
+                "prompt_data": asdict(self.prompts_cache.get(prompt_id)) if prompt_id in self.prompts_cache else None
             }
 
         except Exception as e:
@@ -223,3 +258,12 @@ class PromptHandler:
                 "status": "error",
                 "error": str(e)
             }
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self.setup()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.cleanup()
