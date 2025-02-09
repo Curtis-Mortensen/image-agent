@@ -211,8 +211,7 @@ def main(input_file: Optional[str], output_dir: Optional[str], batch_size: int):
     """Entry point for the application with CLI support."""
     try:
         # Load environment variables
-        from src.api_client import FAL_AI_API_KEY, GEMINI_API_KEY
-        from src.api_client import OUTPUT_BASE_PATH, INPUT_FILE_PATH
+        from config import FAL_AI_API_KEY, GEMINI_API_KEY, OUTPUT_BASE_PATH, INPUT_FILE_PATH
         
         input_path = Path(input_file) if input_file else INPUT_FILE_PATH
         output_path = Path(output_dir) if output_dir else OUTPUT_BASE_PATH

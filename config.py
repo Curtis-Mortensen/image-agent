@@ -22,7 +22,7 @@ INPUT_FILE_PATH = PROJECT_ROOT / "data" / "inputs" / "prompts.json"
 OUTPUT_BASE_PATH = PROJECT_ROOT / "data" / "outputs"
 
 # API Configuration
-FAL_API_URL = "https://110602490-fast-sdxl.fal.run"
+FAL_API_URL = "https://fal.run/fal-ai/fast-sdxl"
 FAL_API_TIMEOUT = 60  # seconds
 FAL_MAX_RETRIES = 3
 FAL_RETRY_DELAY = 60  # seconds
