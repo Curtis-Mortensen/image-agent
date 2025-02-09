@@ -6,24 +6,24 @@ from typing import Dict, List, Optional
 import signal
 from datetime import datetime
 import click
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskID
-from rich.logging import RichHandler
+from rich.console import Console # Removed rich console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskID # Removed rich progress
+from rich.logging import RichHandler # Removed rich handler
 import aiofiles.os
 from concurrent.futures import ProcessPoolExecutor
 
 from src.image_generator import ImageGenerator
 from src.prompt_handler import PromptHandler
 
-# Configure rich console
-console = Console()
+# Configure rich console - REMOVED
+# console = Console()
 
-# Configure logging with rich
+# Configure logging with rich - SIMPLIFIED
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
+    level=logging.DEBUG, # Set level to DEBUG
+    format='%(asctime)s - %(levelname)s - %(message)s', # Basic format
     handlers=[
-        RichHandler(console=console, rich_tracebacks=True),
+        logging.StreamHandler(), # Basic console handler
         logging.FileHandler(f"generation_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
     ]
 )
@@ -43,13 +43,14 @@ class ImageGenerationPipeline:
         )
         self.running = True
         self.tasks: List[asyncio.Task] = []
-        self.progress = Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            console=console
-        )
+        # Rich progress - REMOVED for simplification
+        # self.progress = Progress(
+        #     SpinnerColumn(),
+        #     TextColumn("[progress.description]{task.description}"),
+        #     BarColumn(),
+        #     TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        #     console=console
+        # )
         self.process_pool = ProcessPoolExecutor(max_workers=2)
 
     def setup_signal_handlers(self):
@@ -66,17 +67,17 @@ class ImageGenerationPipeline:
         self.process_pool.shutdown(wait=False)
 
     async def process_prompt(self, prompt_id: str, prompt_data: dict,
-                           progress_task: TaskID) -> bool:
+                           progress_task: TaskID) -> bool: # Removed progress_task: TaskID
         """Process a single prompt through the generation pipeline."""
         try:
-            def update_progress(message: str):
-                self.progress.update(progress_task, description=message)
+            # def update_progress(message: str): # Removed progress update
+            #     self.progress.update(progress_task, description=message)
 
             # Generate and evaluate image
             image_path, evaluation = await self.image_generator.generate_and_evaluate(
                 prompt_data,
                 prompt_id,
-                progress_callback=update_progress
+                # progress_callback=update_progress # Removed progress callback
             )
 
             if not image_path:
@@ -91,7 +92,7 @@ class ImageGenerationPipeline:
                 evaluation=evaluation
             )
 
-            self.progress.update(progress_task, advance=1)
+            # self.progress.update(progress_task, advance=1) # Removed progress update
             logger.info(f"Successfully completed processing for prompt {prompt_id}")
             return True
 
@@ -105,29 +106,30 @@ class ImageGenerationPipeline:
     async def process_batch(self, batch_prompts: Dict[str, dict]) -> None:
         """Process a batch of prompts concurrently."""
         tasks = []
-        with self.progress:
-            overall_progress = self.progress.add_task(
-                "Processing prompts...",
-                total=len(batch_prompts)
+        # with self.progress: # Removed rich progress
+        #     overall_progress = self.progress.add_task(
+        #         "Processing prompts...",
+        #         total=len(batch_prompts)
+        #     )
+
+        for prompt_id, prompt_data in batch_prompts.items():
+            if not self.running:
+                break
+            task = asyncio.create_task(
+                self.process_prompt(prompt_id, prompt_data, None) # Removed overall_progress
             )
+            tasks.append(task)
+            self.tasks.append(task)
 
-            for prompt_id, prompt_data in batch_prompts.items():
-                if not self.running:
-                    break
-                task = asyncio.create_task(
-                    self.process_prompt(prompt_id, prompt_data, overall_progress)
-                )
-                tasks.append(task)
-                self.tasks.append(task)
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            self.tasks = [t for t in self.tasks if not t.done()]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        self.tasks = [t for t in self.tasks if not t.done()]
 
         successful = sum(1 for r in results if r is True)
         logger.info(f"Batch completed: {successful}/{len(results)} successful")
 
     async def run(self) -> None:
         """Run the complete pipeline."""
+        logger.info("Starting pipeline run...") # ADDED LOGGING START
         try:
             async with self.prompt_handler, self.image_generator:
                 prompts = await self.prompt_handler.load_prompts()
@@ -155,6 +157,7 @@ class ImageGenerationPipeline:
             logger.error(f"Pipeline failed: {str(e)}", exc_info=True)
         finally:
             self.process_pool.shutdown(wait=True)
+        logger.info("Pipeline run finished.") # ADDED LOGGING END
 
 @click.command()
 @click.option('--input-file', type=click.Path(exists=True), help='Path to input prompts JSON file')

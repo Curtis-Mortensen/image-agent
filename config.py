@@ -24,38 +24,33 @@ OUTPUT_BASE_PATH = PROJECT_ROOT / "data" / "outputs"
 # API Configuration
 FAL_API_URL = "https://fal.run/fal-ai/fast-sdxl"
 FAL_API_TIMEOUT = 60  # seconds
-FAL_MAX_RETRIES = 2
+FAL_MAX_RETRIES = 3
 FAL_RETRY_DELAY = 60  # seconds
 
 # Image Generation Settings
 IMAGE_SIZE = (1024, 1024)
 BATCH_SIZE = 3
 DEFAULT_NEGATIVE_PROMPT = "blurry, low quality, distorted, deformed, ugly, bad anatomy"
-DEFAULT_NUM_INFERENCE_STEPS = 8 # Updated to a valid value: 8
+DEFAULT_NUM_INFERENCE_STEPS = 8
 DEFAULT_GUIDANCE_SCALE = 7.5
 
-# Rich Progress Bar Settings
+# Rich Progress Bar Settings - REMOVED for simplification
 PROGRESS_REFRESH_PER_SECOND = 10
 PROGRESS_TRANSIENT = True
 
-# Logging Configuration
+# Logging Configuration - SIMPLIFIED
 LOGGING_CONFIG: Dict[str, Any] = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
         'standard': {
-            'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            'format': '%(asctime)s - %(levelname)s - %(name)s - %(message)s' # Basic format
         },
-        'rich': {
-            'format': '%(message)s'
-        }
     },
     'handlers': {
         'console': {
-            'class': 'rich.logging.RichHandler',
-            'formatter': 'rich',
-            'rich_tracebacks': True,
-            'tracebacks_show_locals': True,
+            'class': 'logging.StreamHandler', # Basic console handler
+            'formatter': 'standard',
         },
         'file': {
             'class': 'logging.FileHandler',
@@ -66,7 +61,7 @@ LOGGING_CONFIG: Dict[str, Any] = {
     'loggers': {
         '': {  # root logger
             'handlers': ['console', 'file'],
-            'level': os.getenv('LOG_LEVEL', 'INFO'),
+            'level': os.getenv('LOG_LEVEL', 'DEBUG'), # Set level to DEBUG for more logs
             'propagate': True
         }
     }
