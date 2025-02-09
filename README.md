@@ -16,21 +16,7 @@ A Python-based system for batch processing and refinement of AI-generated images
 - FAL.ai API key
 - Google Gemini API key
 
-## Important Note About Dependencies
-
-This project requires several external packages that need to be installed in a full Python environment:
-```
-aiohttp>=3.8.0
-Pillow>=10.0.0
-google-generativeai>=0.3.0
-python-dotenv>=1.0.0
-asyncio>=3.4.3
-pathlib>=1.0.1
-```
-
-However, since we're running in WebContainer which only supports Python standard library, we've adapted the code to work within these limitations.
-
-## Setup
+## Installation
 
 1. Clone the repository:
 ```bash
@@ -38,15 +24,32 @@ git clone [repository-url]
 cd image-agent
 ```
 
-2. Set up environment variables:
+2. Create and activate a virtual environment (recommended):
 ```bash
-export FAL_AI_API_KEY="your_fal_ai_key_here"
-export GEMINI_API_KEY="your_gemini_key_here"
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-## Running the Program
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-1. Place your prompts in `data/inputs/prompts.json`:
+4. Set up your environment:
+```bash
+cp .env.local.example .env.local
+# Edit .env.local with your API keys
+```
+
+5. Set up your prompts:
+```bash
+cp prompts.json.example .prompts.json
+# Edit .prompts.json with your prompts
+```
+
+## Usage
+
+1. Ensure your prompts are properly formatted in `.prompts.json`:
 ```json
 {
     "prompts": [
@@ -63,16 +66,8 @@ export GEMINI_API_KEY="your_gemini_key_here"
 
 2. Run the pipeline:
 ```bash
-python3 src/main.py
+python -m src.main
 ```
-
-The program will:
-1. Load prompts from your JSON file
-2. Process each prompt in batches
-3. Generate initial images
-4. Evaluate the results
-5. Generate refined versions
-6. Save all outputs in the results directory
 
 ## Output Structure
 
@@ -90,26 +85,68 @@ outputs/
 
 ## Monitoring Progress
 
-- Check the console output for real-time progress
-- Review the generated log file in the project directory
-- Examine the summary.json files in each prompt's output directory
+- Real-time console output shows generation progress
+- Check the log file (generation_log_[timestamp].log)
+- Review summary.json files in each prompt's output directory
 
 ## Configuration
 
 Adjust settings in `config.py`:
-- Image size
-- Batch size
-- API timeouts
-- Retry settings
-- Output paths
+- Image generation parameters
+- Batch processing size
+- API configurations
+- Output paths and formats
+
+## Advanced Usage
+
+### Customizing Generation Parameters
+
+Modify the default parameters in `config.py`:
+```python
+IMAGE_SIZE = (1024, 1024)
+BATCH_SIZE = 3
+DEFAULT_NUM_INFERENCE_STEPS = 30
+DEFAULT_GUIDANCE_SCALE = 7.5
+```
+
+### API Rate Limiting
+
+The system handles API rate limits automatically with exponential backoff:
+- FAL.ai API: Retries with configurable delays
+- Gemini API: Built-in rate limit handling
 
 ## Troubleshooting
 
 Common issues:
-1. **Environment Variables**: Make sure both API keys are properly set
-2. **Input JSON**: Verify your prompts.json follows the required format
-3. **Permissions**: Ensure the program has write access to create output directories
-4. **API Limits**: Check if you've hit any API rate limits
+
+1. **API Authentication**:
+   - Verify API keys in .env.local
+   - Check API key permissions
+
+2. **Dependencies**:
+   - Ensure all requirements are installed: `pip install -r requirements.txt`
+   - Check Python version (3.7+ required)
+
+3. **Input/Output**:
+   - Verify .prompts.json format
+   - Check write permissions for output directory
+
+4. **Rate Limits**:
+   - Monitor API usage
+   - Adjust batch size if needed
+
+## Development
+
+### Running Tests
+```bash
+python -m pytest tests/
+```
+
+### Code Style
+```bash
+black src/
+flake8 src/
+```
 
 ## License
 
@@ -117,124 +154,8 @@ Common issues:
 
 ## Contributing
 
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
-# AI Image Generation Pipeline
-
-A Python-based system for batch processing and refinement of AI-generated images using FAL.ai and Google's Gemini API.
-
-## Features
-
-- Batch image generation with FAL.ai
-- Automated image evaluation using Gemini Vision
-- Prompt refinement based on evaluations
-- Concurrent processing for efficiency
-- Comprehensive result tracking and organization
-
-## Prerequisites
-
-- Python 3.7+
-- FAL.ai API key
-- Google Gemini API key
-
-## Important Note About Dependencies
-
-This project requires several external packages that need to be installed in a full Python environment:
-```
-aiohttp>=3.8.0
-Pillow>=10.0.0
-google-generativeai>=0.3.0
-python-dotenv>=1.0.0
-asyncio>=3.4.3
-pathlib>=1.0.1
-```
-
-However, since we're running in WebContainer which only supports Python standard library, we've adapted the code to work within these limitations.
-
-## Setup
-
-1. Clone the repository:
-```bash
-git clone [repository-url]
-cd image-agent
-```
-
-2. Set up environment variables:
-```bash
-export FAL_AI_API_KEY="your_fal_ai_key_here"
-export GEMINI_API_KEY="your_gemini_key_here"
-```
-
-## Running the Program
-
-1. Place your prompts in `data/inputs/prompts.json`:
-```json
-{
-    "prompts": [
-        {
-            "id": "scene_001",
-            "title": "Forest Awakening",
-            "scene": "Deep in a mystical forest",
-            "mood": "Ethereal, peaceful",
-            "prompt": "A shaft of golden morning light piercing through misty ancient trees"
-        }
-    ]
-}
-```
-
-2. Run the pipeline:
-```bash
-python3 src/main.py
-```
-
-The program will:
-1. Load prompts from your JSON file
-2. Process each prompt in batches
-3. Generate initial images
-4. Evaluate the results
-5. Generate refined versions
-6. Save all outputs in the results directory
-
-## Output Structure
-
-```
-outputs/
-└── results/
-    └── prompt_id/
-        ├── iteration_1.png
-        ├── iteration_1_results.json
-        ├── iteration_1_evaluation.json
-        ├── iteration_2.png
-        ├── iteration_2_results.json
-        └── summary.json
-```
-
-## Monitoring Progress
-
-- Check the console output for real-time progress
-- Review the generated log file in the project directory
-- Examine the summary.json files in each prompt's output directory
-
-## Configuration
-
-Adjust settings in `config.py`:
-- Image size
-- Batch size
-- API timeouts
-- Retry settings
-- Output paths
-
-## Troubleshooting
-
-Common issues:
-1. **Environment Variables**: Make sure both API keys are properly set
-2. **Input JSON**: Verify your prompts.json follows the required format
-3. **Permissions**: Ensure the program has write access to create output directories
-4. **API Limits**: Check if you've hit any API rate limits
-
-## License
-
-[Your License Here]
-
-## Contributing
-
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
