@@ -1,0 +1,6 @@
+aiohttp>=3.8.0
+Pillow>=10.0.0
+google-generativeai>=0.3.0
+python-dotenv>=1.0.0
+asyncio>=3.4.3
+pathlib>=1.0.1
