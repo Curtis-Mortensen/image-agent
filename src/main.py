@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 class ImageGenerationPipeline:
     """Orchestrates the image generation pipeline with progress tracking."""
-    
+
     def __init__(self, input_file_path: Path, output_base_path: Path,
                  fal_api_key: str, gemini_api_key: str):
         """Initialize the pipeline with rich progress tracking."""
@@ -122,7 +122,7 @@ class ImageGenerationPipeline:
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
             self.tasks = [t for t in self.tasks if not t.done()]
-        
+
         successful = sum(1 for r in results if r is True)
         logger.info(f"Batch completed: {successful}/{len(results)} successful")
 
@@ -142,7 +142,7 @@ class ImageGenerationPipeline:
                 for i in range(0, total_prompts, batch_size):
                     if not self.running:
                         break
-                    
+
                     batch_prompts = dict(list(prompts.items())[i:i + batch_size])
                     logger.info(f"Processing batch {i//batch_size + 1}")
                     await self.process_batch(batch_prompts)
@@ -163,18 +163,18 @@ class ImageGenerationPipeline:
 def main(input_file: Optional[str], output_dir: Optional[str], batch_size: int):
     """Entry point for the application."""
     try:
-        from config import FAL_AI_API_KEY, GEMINI_API_KEY, OUTPUT_BASE_PATH, INPUT_FILE_PATH
-        
+        from config import FAL_KEY, GEMINI_API_KEY, OUTPUT_BASE_PATH, INPUT_FILE_PATH
+
         input_path = Path(input_file) if input_file else INPUT_FILE_PATH
         output_path = Path(output_dir) if output_dir else OUTPUT_BASE_PATH
-        
+
         pipeline = ImageGenerationPipeline(
             input_file_path=input_path,
             output_base_path=output_path,
-            fal_api_key=FAL_AI_API_KEY,
+            fal_api_key=FAL_KEY,
             gemini_api_key=GEMINI_API_KEY
         )
-        
+
         pipeline.setup_signal_handlers()
         asyncio.run(pipeline.run())
 

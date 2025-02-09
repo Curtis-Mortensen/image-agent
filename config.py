@@ -8,9 +8,9 @@ from typing import Dict, Any
 load_dotenv('.env.local')
 
 # API Keys
-FAL_AI_API_KEY = os.getenv('FAL_AI_API_KEY')
-if not FAL_AI_API_KEY:
-    raise ValueError("FAL_AI_API_KEY not found in .env.local")
+FAL_KEY = os.getenv('FAL_KEY')
+if not FAL_KEY:
+    raise ValueError("FAL_KEY not found in .env.local")
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 if not GEMINI_API_KEY:
@@ -31,7 +31,7 @@ FAL_RETRY_DELAY = 60  # seconds
 IMAGE_SIZE = (1024, 1024)
 BATCH_SIZE = 3
 DEFAULT_NEGATIVE_PROMPT = "blurry, low quality, distorted, deformed, ugly, bad anatomy"
-DEFAULT_NUM_INFERENCE_STEPS = 30
+DEFAULT_NUM_INFERENCE_STEPS = 8 # Updated to a valid value: 8
 DEFAULT_GUIDANCE_SCALE = 7.5
 
 # Rich Progress Bar Settings

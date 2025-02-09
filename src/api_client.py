@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class FalClient:
     """Client for interacting with the fal.ai API."""
-    
+
     def __init__(self, api_key: str, timeout: int = 60):
         self.api_key = api_key
         self.timeout = timeout
@@ -43,11 +43,11 @@ class FalClient:
     async def generate_image(self, prompt: str, **kwargs) -> Optional[Dict[str, Any]]:
         """
         Generate an image using fal.ai API with automatic retries.
-        
+
         Args:
             prompt: The text prompt for image generation
             **kwargs: Additional parameters for image generation
-            
+
         Returns:
             Dictionary containing the API response or None if failed
         """
@@ -80,4 +80,29 @@ class FalClient:
             logger.error(f"Error generating image: {str(e)}")
             raise
 
-[Rest of the file remains unchanged...]
+
+class GeminiClient:
+    """Client for interacting with the Google Gemini API."""
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+
+    async def setup(self):
+        """Initialize the client."""
+        pass
+
+    async def cleanup(self):
+        """Clean up resources."""
+        pass
+
+    async def evaluate_image(self, image_file):
+        """Evaluate an image using Google Gemini API."""
+        # Placeholder implementation
+        print("GeminiClient: evaluate_image - not implemented")
+        return {}
+
+    async def refine_prompt(self, original_prompt: str, evaluation_result: dict):
+        """Refine a prompt using Google Gemini API."""
+        # Placeholder implementation
+        print("GeminiClient: refine_prompt - not implemented")
+        return original_prompt

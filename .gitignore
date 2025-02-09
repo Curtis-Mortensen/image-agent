@@ -31,7 +31,7 @@ wheels/
 .env.local
 
 # Input/Output data
-.prompts.json
+prompts.json
 data/inputs/*.json
 data/outputs/
 
