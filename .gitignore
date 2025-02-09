@@ -1,11 +1,8 @@
-# Environment variables
-.env
-.env.local
-
-# Input/Output data
-.prompts.json
-data/inputs/*.json
-data/outputs/
+# Virtual Environment
+venv/
+.venv/
+ENV/
+env/
 
 # Python
 __pycache__/
@@ -28,6 +25,15 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Environment Variables
+.env
+.env.local
+
+# Input/Output data
+.prompts.json
+data/inputs/*.json
+data/outputs/
 
 # Logs
 *.log
