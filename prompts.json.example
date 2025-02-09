@@ -1,0 +1,11 @@
+{
+  "prompts": [
+    {
+      "id": "scene_001",
+      "title": "Forest Awakening",
+      "scene": "Deep in a mystical forest",
+      "mood": "Ethereal, peaceful",
+      "prompt": "A shaft of golden morning light piercing through misty ancient trees"
+    }
+  ]
+}

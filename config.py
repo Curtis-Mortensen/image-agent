@@ -1,14 +1,18 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env.local
+load_dotenv('.env.local')
 
 # API Keys
 FAL_AI_API_KEY = os.getenv('FAL_AI_API_KEY')
 if not FAL_AI_API_KEY:
-    raise ValueError("FAL_AI_API_KEY environment variable is required")
+    raise ValueError("FAL_AI_API_KEY not found in .env.local")
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable is required")
+    raise ValueError("GEMINI_API_KEY not found in .env.local")
 
 # File Paths
 PROJECT_ROOT = Path(__file__).parent
