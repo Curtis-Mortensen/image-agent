@@ -10,13 +10,65 @@ The system takes a collection of image prompts (with context like scene descript
 4. Generates a second iteration of the image
 5. Saves all results, including original prompts, generated images, evaluations, and refined prompts
 
-## Key Features
-- Reads prompts and context from a JSON file
-- Interfaces with fal.ai's image generation APIs
-- Uses Gemini Vision API for image evaluation
-- Generates refined prompts using Gemini
-- Saves all iterations and metadata in an organized directory structure
-- Handles errors and API rate limits gracefully
+## Architecture & Standards
+
+### Async/Sync Standards
+- All API interactions (fal.ai, Gemini) are async
+- File I/O operations remain synchronous (no async benefit)
+- Main execution flow is async for concurrent processing
+- Batch processing uses asyncio.gather for parallel execution
+- Signal handlers are synchronous (OS requirement)
+
+### Class Structure
+1. **ImageGenerationPipeline** (main.py)
+   - Orchestrates overall process
+   - Handles batch processing
+   - Manages graceful shutdown
+   - Coordinates between components
+
+2. **ImageGenerator** (image_generator.py)
+   - Handles image generation logic
+   - Manages API client interactions
+   - Coordinates evaluation and refinement
+   - Async methods for API operations
+
+3. **PromptHandler** (prompt_handler.py)
+   - Manages prompt loading and validation
+   - Handles result saving
+   - Synchronous file operations
+   - Maintains output organization
+
+4. **API Clients** (api_client.py)
+   - FalClient: Handles fal.ai API interactions
+   - GeminiClient: Manages Gemini API operations
+   - Async methods for API calls
+   - Handles rate limiting and retries
+
+### Error Handling Standards
+1. **API Errors**
+   - Retry logic for transient failures
+   - Rate limit handling with exponential backoff
+   - Detailed error logging
+   - Graceful degradation
+
+2. **File Operations**
+   - Path existence checks
+   - Permission validation
+   - Atomic write operations where possible
+   - Detailed error messages
+
+3. **Data Validation**
+   - Input prompt validation
+   - Data structure verification
+   - Type checking
+   - Required field validation
+
+### Logging Standards
+- Hierarchical logger setup
+- Both file and console logging
+- Structured log format
+- Different log levels for different purposes
+- Timestamp in log filename
 
 ## Input Format
 The system accepts JSON files containing prompts structured like this:
@@ -35,110 +87,128 @@ The system accepts JSON files containing prompts structured like this:
 ```
 
 ## Output Structure
-For each prompt, the system creates a directory containing:
-- The original prompt and context
-- First generation image
-- Gemini's evaluation
-- Refined prompt
-- Second generation image
-- All associated metadata
+```
+outputs/
+└── results/
+    └── prompt_id/
+        ├── iteration_1.png
+        ├── iteration_1_results.json
+        ├── iteration_1_evaluation.json
+        ├── iteration_2.png
+        ├── iteration_2_results.json
+        └── summary.json
+```
+
+## Key Implementation Details
+
+### Batch Processing
+- Default batch size: 3 concurrent operations
+- Configurable through ImageGenerator.BATCH_SIZE
+- Uses asyncio.gather for parallel execution
+- Maintains task list for cleanup
+
+### Resource Management
+- Proper async context management
+- Cleanup in finally blocks
+- Signal handler for graceful shutdown
+- Task cancellation handling
+
+### API Integration
+1. **FAL.ai Integration**
+   - Async HTTP requests
+   - Rate limit handling
+   - Retry mechanism
+   - Error handling
+
+2. **Gemini Integration**
+   - Vision API for evaluation
+   - Text API for prompt refinement
+   - Async operation handling
+   - Response parsing
+
+### File Management
+- Organized directory structure
+- Atomic write operations
+- JSON for metadata storage
+- Summary file maintenance
+
+### Performance Considerations
+- Batch processing for optimal throughput
+- Concurrent API calls
+- Efficient resource cleanup
+- Memory management
 
 ## Technical Requirements
-- Must handle API authentication for both fal.ai and Gemini
-- Must implement proper error handling and logging
-- Must create organized, human-readable output directories
-- Must handle batch processing efficiently
-- Must save all iterations and metadata for future reference
+- Python 3.7+
+- Async/await support
+- JSON processing
+- Image handling
+- HTTP client support
 
-This is designed as a minimum viable product (MVP) that can be extended later with features like:
-- Multiple model comparison
-- Success criteria for continued iterations
-- GUI interface
-- Real-time progress tracking
-- Additional AI model integrations
+## Dependencies
+```python
+aiohttp        # Async HTTP client
+Pillow         # Image processing
+google.generativeai  # Gemini API
+```
 
-The system should be built to be modular and extensible, allowing for easy addition of new features and API integrations in the future.
+## Error Handling Strategy
+1. **API Errors**
+   - Retry with exponential backoff
+   - Rate limit handling
+   - Error logging
+   - Graceful degradation
 
-Here's a detailed description for each Python file in the project:
+2. **File Operations**
+   - Path validation
+   - Permission checks
+   - Atomic operations
+   - Error reporting
 
-**config.py**
-- Store API keys and configuration settings
-- Constants should include:
-  - FAL_AI_API_KEY
-  - GEMINI_API_KEY
-  - OUTPUT_BASE_PATH (for storing generated images)
-  - INPUT_FILE_PATH (path to prompts.json)
-  - MODEL_ID (e.g., "sd-1.5", "sdxl", etc.)
-  - BATCH_SIZE (how many prompts to process at once)
-  - IMAGE_SIZE (tuple of width, height)
+3. **Data Validation**
+   - Schema validation
+   - Type checking
+   - Required fields
+   - Format verification
 
-**src/main.py**
-- Main entry point that orchestrates the entire process
-- Should import PromptHandler and ImageGenerator classes
-- Create a main() function that:
-  1. Loads prompts from json using PromptHandler
-  2. For each prompt:
-     - Generates image using ImageGenerator
-     - Gets evaluation from Gemini
-     - Creates refined prompt
-     - Generates second image
-     - Saves all results
-- Include basic logging setup
-- Include if __name__ == "__main__" block
+## Logging Strategy
+1. **Levels**
+   - ERROR: Operation failures
+   - WARNING: Non-critical issues
+   - INFO: Operation progress
+   - DEBUG: Detailed information
 
-**src/prompt_handler.py**
-- Create PromptHandler class
-- Methods needed:
-  - load_prompts(): reads json file
-  - save_results(prompt_id, iteration, image_path, evaluation, refined_prompt)
-  - create_output_directory(prompt_id)
-  - get_refined_prompt(original_prompt, evaluation): uses Gemini to create new prompt
-- Should handle all file I/O operations
-- Should create necessary directories in outputs/generations/
+2. **Format**
+   ```
+   %(asctime)s - %(name)s - %(levelname)s - %(message)s
+   ```
 
-**src/image_generator.py**
-- Create ImageGenerator class
-- Methods needed:
-  - generate_image(prompt, prompt_id, iteration): calls fal.ai API
-  - evaluate_image(image_path): calls Gemini Vision API
-- Should handle all API interactions
-- Should include error handling for API failures
-- Should save images to appropriate directories using PromptHandler
+3. **Output**
+   - Console output
+   - File logging
+   - Timestamp in filename
 
-**src/api_client.py**
-- Create separate clients for each API service
-- FalClient class:
-  - initialize with API key
-  - method for sending requests to fal.ai
-  - handle response parsing
-- GeminiClient class:
-  - initialize with API key
-  - method for sending image for evaluation
-  - method for generating refined prompts
-- Include retry logic and error handling
+## Best Practices
+1. **Code Organization**
+   - Clear class responsibilities
+   - Proper error handling
+   - Comprehensive logging
+   - Type hints
 
-Each file should use type hints and include proper documentation. The system should be designed to handle API rate limits and potential failures gracefully. All sensitive information should be loaded from environment variables or a secure configuration file.
+2. **Resource Management**
+   - Proper cleanup
+   - Signal handling
+   - Task management
+   - Memory efficiency
 
-The flow should be:
-1. Load prompts from JSON
-2. For each prompt:
-   - Create output directory structure
-   - Generate first image
-   - Save image and metadata
-   - Evaluate with Gemini
-   - Generate refined prompt
-   - Generate second image
-   - Save all results and metadata
+3. **API Integration**
+   - Rate limit respect
+   - Retry logic
+   - Error handling
+   - Response validation
 
-Error handling should include:
-- API failures
-- File I/O errors
-- Invalid prompts
-- Network issues
-- Rate limiting
-
-Logging should track:
-- Start/end of each generation
-- API calls
-- Errors
-- Timing information
+4. **File Operations**
+   - Safe write operations
+   - Directory management
+   - Path handling
+   - Error checking
