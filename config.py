@@ -24,7 +24,7 @@ OUTPUT_BASE_PATH = PROJECT_ROOT / "data" / "outputs"
 # API Configuration
 FAL_API_URL = "https://fal.run/fal-ai/fast-sdxl"
 FAL_API_TIMEOUT = 60  # seconds
-FAL_MAX_RETRIES = 3
+FAL_MAX_RETRIES = 2
 FAL_RETRY_DELAY = 60  # seconds
 
 # Image Generation Settings
