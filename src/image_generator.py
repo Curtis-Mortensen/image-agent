@@ -1,171 +1,186 @@
-import os
+import logging
 import json
 import time
-import asyncio
-import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Any
-import aiohttp
-import google.generativeai as genai
+from typing import Dict, Optional, Tuple
 from PIL import Image
 import base64
 import io
 
+from src.api_client import FalClient, GeminiClient
+
 logger = logging.getLogger(__name__)
 
 class ImageGenerator:
-    # Default image size
+    """Handles the generation, evaluation, and refinement of images."""
+    
     IMAGE_SIZE = (1024, 1024)
-    BATCH_SIZE = 3  # Default batch size for concurrent processing
-
+    BATCH_SIZE = 3
+    
     def __init__(self, fal_api_key: str, gemini_api_key: str, output_base_path: Path):
-        """Initialize the image generator with API keys and output path."""
-        self.fal_api_key = fal_api_key
-        self.output_base_path = output_base_path
-        self.session = None  # Will be initialized in setup
+        """
+        Initialize the image generator with API clients and configuration.
         
-        # Initialize Gemini
-        genai.configure(api_key=gemini_api_key)
-        self.vision_model = genai.GenerativeModel('gemini-pro-vision')
-        self.text_model = genai.GenerativeModel('gemini-pro')
+        Args:
+            fal_api_key: API key for fal.ai
+            gemini_api_key: API key for Google's Gemini
+            output_base_path: Base path for saving outputs
+        """
+        self.output_base_path = Path(output_base_path)
+        self.fal_client = FalClient(fal_api_key)
+        self.gemini_client = GeminiClient(gemini_api_key)
         
-        # FAL.AI API endpoints
-        self.FAL_API_URL = "https://110602490-fast-sdxl.fal.run/generate"
+        # Default generation parameters
+        self.default_params = {
+            "negative_prompt": "blurry, low quality, distorted, deformed, ugly, bad anatomy",
+            "num_inference_steps": 30,
+            "guidance_scale": 7.5,
+            "width": self.IMAGE_SIZE[0],
+            "height": self.IMAGE_SIZE[1]
+        }
 
     async def setup(self):
-        """Initialize async resources."""
-        if not self.session:
-            self.session = aiohttp.ClientSession()
+        """Initialize API clients."""
+        await self.fal_client.setup()
 
     async def cleanup(self):
-        """Cleanup async resources."""
-        if self.session:
-            await self.session.close()
-            self.session = None
+        """Cleanup API clients."""
+        await self.fal_client.cleanup()
 
-    async def generate_image(self, prompt: str, prompt_id: str, iteration: int = 1) -> Optional[Path]:
-        """Generate an image using FAL.AI API and save it."""
+    def _save_image(self, image_data: bytes, prompt_id: str, iteration: int) -> Path:
+        """
+        Save generated image and its metadata.
+        
+        Args:
+            image_data: Raw image data in bytes
+            prompt_id: Unique identifier for the prompt
+            iteration: Iteration number
+            
+        Returns:
+            Path to saved image
+        """
+        output_dir = self.output_base_path / prompt_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save image
+        image = Image.open(io.BytesIO(image_data))
+        image_path = output_dir / f"iteration_{iteration}.png"
+        image.save(image_path)
+        
+        return image_path
+
+    def _save_metadata(self, 
+                      prompt_id: str, 
+                      iteration: int, 
+                      prompt: str, 
+                      params: Dict,
+                      image_path: Path) -> None:
+        """
+        Save metadata for generated image.
+        
+        Args:
+            prompt_id: Unique identifier for the prompt
+            iteration: Iteration number
+            prompt: The prompt used for generation
+            params: Generation parameters used
+            image_path: Path to the generated image
+        """
+        metadata = {
+            "prompt": prompt,
+            "iteration": iteration,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "parameters": params,
+            "image_path": str(image_path)
+        }
+        
+        metadata_path = image_path.parent / f"iteration_{iteration}_metadata.json"
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+    async def generate_image(self, 
+                           prompt: str, 
+                           prompt_id: str, 
+                           iteration: int = 1,
+                           **kwargs) -> Optional[Path]:
+        """
+        Generate an image using the configured API.
+        
+        Args:
+            prompt: Text prompt for image generation
+            prompt_id: Unique identifier for the prompt
+            iteration: Iteration number
+            **kwargs: Additional generation parameters
+            
+        Returns:
+            Path to generated image or None if failed
+        """
         try:
-            if not self.session:
-                await self.setup()
-
-            headers = {
-                "Authorization": f"Key {self.fal_api_key}",
-                "Content-Type": "application/json"
-            }
+            # Merge default params with any provided kwargs
+            params = {**self.default_params, **kwargs, "prompt": prompt}
             
-            payload = {
-                "prompt": prompt,
-                "negative_prompt": "blurry, low quality, distorted, deformed",
-                "num_inference_steps": 30,
-                "guidance_scale": 7.5,
-                "width": self.IMAGE_SIZE[0],
-                "height": self.IMAGE_SIZE[1]
-            }
+            # Generate image
+            response = await self.fal_client.generate_image(**params)
+            if not response:
+                logger.error(f"Failed to generate image for prompt {prompt_id}")
+                return None
             
-            async with self.session.post(self.FAL_API_URL, headers=headers, json=payload) as response:
-                if response.status == 429:  # Rate limit
-                    await self._handle_rate_limit()
-                    return await self.generate_image(prompt, prompt_id, iteration)
-                
-                response.raise_for_status()
-                response_data = await response.json()
-            
-            # Decode base64 image
-            image_data = base64.b64decode(response_data['images'][0])
-            image = Image.open(io.BytesIO(image_data))
-            
-            # Save image
-            output_dir = self.output_base_path / prompt_id
-            output_dir.mkdir(parents=True, exist_ok=True)
-            
-            image_path = output_dir / f"iteration_{iteration}.png"
-            image.save(image_path)
+            # Decode and save image
+            image_data = base64.b64decode(response['images'][0])
+            image_path = self._save_image(image_data, prompt_id, iteration)
             
             # Save metadata
-            metadata = {
-                "prompt": prompt,
-                "iteration": iteration,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "parameters": payload
-            }
-            
-            metadata_path = output_dir / f"iteration_{iteration}_metadata.json"
-            with open(metadata_path, 'w') as f:
-                json.dump(metadata, f, indent=2)
+            self._save_metadata(prompt_id, iteration, prompt, params, image_path)
             
             return image_path
             
         except Exception as e:
-            print(f"Error generating image: {str(e)}")
+            logger.error(f"Error generating image for prompt {prompt_id}: {str(e)}")
             return None
-            
+
     async def evaluate_image(self, image_path: Path) -> Optional[Dict]:
-        """Evaluate generated image using Gemini Vision API."""
+        """
+        Evaluate generated image using Gemini Vision.
+        
+        Args:
+            image_path: Path to image file
+            
+        Returns:
+            Dictionary containing evaluation results or None if failed
+        """
         try:
             if not image_path.exists():
                 raise FileNotFoundError(f"Image not found at {image_path}")
-                
+            
             image = Image.open(image_path)
+            evaluation = await self.gemini_client.evaluate_image(image)
             
-            evaluation_prompt = """
-            Analyze this AI-generated image and provide a detailed evaluation including:
-            1. Overall quality and coherence
-            2. How well it matches typical expectations
-            3. Any notable issues or artifacts
-            4. Suggestions for improvement
-            Provide the response as a JSON with these keys: quality, coherence, issues, suggestions
-            """
+            if evaluation:
+                # Save evaluation results
+                eval_path = image_path.parent / f"{image_path.stem}_evaluation.json"
+                with open(eval_path, 'w') as f:
+                    json.dump(evaluation, f, indent=2)
             
-            response = await self.vision_model.generate_content([evaluation_prompt, image])
-            
-            try:
-                evaluation = json.loads(response.text)
-            except json.JSONDecodeError:
-                # Fallback if response isn't valid JSON
-                evaluation = {
-                    "quality": response.text,
-                    "coherence": None,
-                    "issues": None,
-                    "suggestions": None
-                }
-            
-            # Save evaluation
-            output_dir = image_path.parent
-            eval_path = output_dir / f"{image_path.stem}_evaluation.json"
-            with open(eval_path, 'w') as f:
-                json.dump(evaluation, f, indent=2)
-                
             return evaluation
-                
-        except Exception as e:
-            print(f"Error evaluating image: {str(e)}")
-            return None
             
+        except Exception as e:
+            logger.error(f"Error evaluating image {image_path}: {str(e)}")
+            return None
+
     async def refine_prompt(self, original_prompt: str, evaluation: Dict) -> Optional[str]:
-        """Generate a refined prompt based on the evaluation."""
+        """
+        Generate refined prompt based on evaluation.
+        
+        Args:
+            original_prompt: Original generation prompt
+            evaluation: Dictionary containing image evaluation
+            
+        Returns:
+            Refined prompt string or None if failed
+        """
         try:
-            refinement_prompt = f"""
-            Original prompt: {original_prompt}
-            
-            Image evaluation:
-            Quality: {evaluation.get('quality', 'N/A')}
-            Issues: {evaluation.get('issues', 'N/A')}
-            Suggestions: {evaluation.get('suggestions', 'N/A')}
-            
-            Based on this evaluation, please generate an improved version of the original prompt
-            that addresses the noted issues and incorporates the suggestions.
-            Provide only the refined prompt text without any explanation.
-            """
-            
-            response = await self.text_model.generate_content(refinement_prompt)
-            return response.text.strip()
+            refined_prompt = await self.gemini_client.refine_prompt(original_prompt, evaluation)
+            return refined_prompt
             
         except Exception as e:
-            print(f"Error refining prompt: {str(e)}")
+            logger.error(f"Error refining prompt: {str(e)}")
             return None
-            
-    async def _handle_rate_limit(self, retry_after: int = 60):
-        """Handle rate limiting by waiting."""
-        print(f"Rate limit reached. Waiting {retry_after} seconds...")
-        await asyncio.sleep(retry_after)logger = logging.getLogger(__name__)
