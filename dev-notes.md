@@ -67,6 +67,36 @@
 - Runtime parameters
 - Usage help
 
+## Recent Updates
+
+### FAL.ai API Integration Changes
+- Migrated to subscription-based FAL.ai API
+- Implemented new `fal_client.subscribe()` approach
+- Updated model ID to "fal-ai/fast-lightning-sdxl"
+- Added real-time status updates and log streaming
+- Improved error handling for API responses
+
+### Architecture Improvements
+
+#### 1. Code Reorganization
+- Removed duplicate functionality between main.py and image_generator.py
+- Centralized image generation logic in ImageGenerator class
+- Simplified pipeline orchestration in main.py
+- Improved separation of concerns
+
+#### 2. New ImageGenerator Features
+- Added `generate_and_evaluate` method for complete generation flow
+- Implemented progress callback system
+- Centralized prompt construction
+- Enhanced error handling and logging
+- Improved API client initialization
+
+#### 3. Pipeline Refinements
+- Streamlined batch processing
+- Enhanced progress tracking
+- Improved error recovery
+- Better resource management
+
 ## Dependencies
 
 ```python
