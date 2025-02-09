@@ -11,3 +11,4 @@ pyyaml>=6.0.0
 jsonschema>=4.0.0
 backoff>=2.2.0
 tenacity>=8.0.0
+fal-client>=0.5.8 
