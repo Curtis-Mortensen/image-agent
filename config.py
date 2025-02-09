@@ -31,26 +31,31 @@ FAL_RETRY_DELAY = 60  # seconds
 IMAGE_SIZE = (1024, 1024)
 BATCH_SIZE = 3
 DEFAULT_NEGATIVE_PROMPT = "blurry, low quality, distorted, deformed, ugly, bad anatomy"
-DEFAULT_NUM_INFERENCE_STEPS = 8
+DEFAULT_NUM_INFERENCE_STEPS = 8 # Updated to a valid value: 8
 DEFAULT_GUIDANCE_SCALE = 7.5
 
-# Rich Progress Bar Settings - REMOVED for simplification
+# Rich Progress Bar Settings
 PROGRESS_REFRESH_PER_SECOND = 10
 PROGRESS_TRANSIENT = True
 
-# Logging Configuration - SIMPLIFIED
+# Logging Configuration
 LOGGING_CONFIG: Dict[str, Any] = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
         'standard': {
-            'format': '%(asctime)s - %(levelname)s - %(name)s - %(message)s' # Basic format
+            'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         },
+        'rich': {
+            'format': '%(message)s'
+        }
     },
     'handlers': {
         'console': {
-            'class': 'logging.StreamHandler', # Basic console handler
-            'formatter': 'standard',
+            'class': 'rich.logging.RichHandler',
+            'formatter': 'rich',
+            'rich_tracebacks': True,
+            'tracebacks_show_locals': True,
         },
         'file': {
             'class': 'logging.FileHandler',
@@ -61,7 +66,7 @@ LOGGING_CONFIG: Dict[str, Any] = {
     'loggers': {
         '': {  # root logger
             'handlers': ['console', 'file'],
-            'level': os.getenv('LOG_LEVEL', 'DEBUG'), # Set level to DEBUG for more logs
+            'level': os.getenv('LOG_LEVEL', 'INFO'),
             'propagate': True
         }
     }
