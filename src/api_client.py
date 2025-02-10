@@ -28,21 +28,11 @@ class APICallTracker:
     
     def __init__(self, db_path: str = DATABASE_PATH) -> None:
         self.db_path = db_path
-        self._init_db()  # Initialize DB on creation
 
     def _init_db(self) -> None:
         """Initialize the database synchronously."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS api_calls (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    api_name TEXT NOT NULL,
-                    endpoint TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    error TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+        # Database initialization is now handled by DatabaseGenerator
+        pass
 
     async def log_call(
         self,
