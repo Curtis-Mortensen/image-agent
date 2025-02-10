@@ -1,116 +1,160 @@
 import google.generativeai as genai
 import logging
 from typing import Optional, Dict
-import aiofiles
-import json
+import sqlite3
 from pathlib import Path
 from datetime import datetime
 
-from src.prompt_handler import PromptHandler # Import PromptHandler
+from src.prompt_handler import PromptHandler
 
 logger = logging.getLogger(__name__)
 
 class PromptRefiner:
-    """Handles prompt refinement using Google Gemini API, saving adjusted refined prompts."""
+    """Handles prompt refinement using Google Gemini API with database tracking."""
 
-    def __init__(self, api_key: str, data_base_path: Path, prompt_handler: PromptHandler):
+    def __init__(self, api_key: str, data_base_path: Path, prompt_handler: PromptHandler,
+                 db_path: str = "image_generation.db"):
         self.api_key = api_key
         self.data_base_path = data_base_path
         self.prompt_handler = prompt_handler
+        self.db_path = db_path
+        self.adherence_phrase = "Image adheres to the prompt"
+        
+        # Initialize Gemini API
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-2.0-flash')
-        self.adherence_phrase = "Image adheres to the prompt"
-        self.refined_prompts_dir = self.data_base_path / "refined_prompts"
+        
+        # Initialize database
+        self._init_db()
 
-    async def setup(self):
-        """Initialize and ensure refined prompts directory exists."""
-        await aiofiles.os.makedirs(self.refined_prompts_dir, exist_ok=True)
+    def _init_db(self):
+        """Initialize database table for refined prompts."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS refined_prompts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    original_prompt_id TEXT NOT NULL,
+                    iteration INTEGER NOT NULL,
+                    refined_prompt TEXT NOT NULL,
+                    evaluation_text TEXT NOT NULL,
+                    needs_refinement BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (original_prompt_id) REFERENCES prompts(id),
+                    UNIQUE(original_prompt_id, iteration)
+                )
+            """)
 
-    async def cleanup(self):
-        """Clean up resources."""
-        pass
+    async def _save_refined_prompt(self, prompt_id: str, original_prompt: str,
+                                 evaluation_text: str, refined_content: str,
+                                 needs_refinement: bool) -> None:
+        """Save refined prompt to database."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Get current max iteration for this prompt
+                cursor = conn.execute("""
+                    SELECT COALESCE(MAX(iteration), 0) + 1
+                    FROM refined_prompts
+                    WHERE original_prompt_id = ?
+                """, (prompt_id,))
+                next_iteration = cursor.fetchone()[0]
 
-    async def _get_next_iteration_number(self) -> int:
-        """Determine the next iteration number for refined prompts file."""
-        max_iteration = 0
-        async for filename in aiofiles.os.listdir(self.refined_prompts_dir):
-            if filename.startswith("refined_prompts_") and filename.endswith(".json"):
-                try:
-                    iteration_num = int(filename[len("refined_prompts_"):-len(".json")])
-                    max_iteration = max(max_iteration, iteration_num)
-                except ValueError:
-                    continue
-        return max_iteration + 1
+                # Save refined prompt
+                conn.execute("""
+                    INSERT INTO refined_prompts
+                    (original_prompt_id, iteration, refined_prompt, 
+                     evaluation_text, needs_refinement)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    prompt_id,
+                    next_iteration,
+                    refined_content,
+                    evaluation_text,
+                    needs_refinement
+                ))
 
-    async def _save_refined_prompt(self, prompt_id: str, original_prompt: str, evaluation_text: str, refined_prompt_content: str):
-        """Save the blended refined prompt to a JSON file with adjusted format."""
-        iteration_num = await self._get_next_iteration_number()
-        new_prompt_id = f"{prompt_id}_{iteration_num}"
-        refined_prompt_filename = self.refined_prompts_dir / f"refined_prompts_{iteration_num}.json"
+                logger.info(f"Saved refined prompt for {prompt_id}, iteration {next_iteration}")
 
-        # Get original prompt data from PromptHandler cache
-        original_prompt_data = self.prompt_handler.prompts_cache.get(prompt_id)
-        if not original_prompt_data:
-            logger.error(f"Original prompt data not found for prompt_id: {prompt_id}")
-            return
+        except Exception as e:
+            logger.error(f"Error saving refined prompt: {str(e)}")
 
-        blended_prompt = refined_prompt_content # Refined prompt is the blended prompt
+    async def get_refinement_history(self, prompt_id: str) -> list:
+        """Retrieve refinement history for a prompt."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT iteration, refined_prompt, evaluation_text,
+                           needs_refinement, created_at
+                    FROM refined_prompts
+                    WHERE original_prompt_id = ?
+                    ORDER BY iteration DESC
+                """, (prompt_id,))
+                return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Error retrieving refinement history: {str(e)}")
+            return []
 
-        refined_prompt_data = {
-            "id": new_prompt_id,
-            "iteration": iteration_num,
-            "timestamp": datetime.now().isoformat(),
-            "title": original_prompt_data.title, # Keep original title
-            "scene": original_prompt_data.scene, # Keep original scene
-            "mood": original_prompt_data.mood, # Keep original mood
-            "prompt": blended_prompt, # Use "prompt" field for refined prompt - IMPORTANT CHANGE
-            "evaluation_text": evaluation_text
-        }
-
-        async with aiofiles.open(refined_prompt_filename, 'w') as f:
-            await f.write(json.dumps(refined_prompt_data, indent=2))
-        logger.info(f"Refined prompt saved to: {refined_prompt_filename}")
-
-
-    async def refine_prompt(self, original_prompt: str, prompt_id: str, evaluation_result: Dict) -> Optional[str]:
-        """Refine a prompt using Gemini API, saving adjusted format refined prompt."""
+    async def refine_prompt(self, original_prompt: str, prompt_id: str,
+                           evaluation_result: Dict) -> Optional[str]:
+        """Refine a prompt using Gemini API and store results."""
         try:
             if not evaluation_result or 'evaluation_text' not in evaluation_result:
-                logger.warning("No evaluation result provided for prompt refinement.")
-                return "No evaluation provided, cannot refine."
+                logger.warning("No evaluation result provided")
+                return None
 
             evaluation_text = evaluation_result['evaluation_text']
-            logger.info(f"Prompt Evaluation Text: {evaluation_text}")
+            needs_refinement = True
 
             if self.adherence_phrase.lower() in evaluation_text.lower():
-                logger.info(f"Gemini evaluation indicates adherence with phrase: '{self.adherence_phrase}'. No refinement needed.")
-                return f"Success: {self.adherence_phrase}. No refinement needed."
+                logger.info("Image adheres to prompt, no refinement needed")
+                needs_refinement = False
+                return original_prompt
 
             prompt_instruction = (
-                "You are evaluating if a generated image adheres to a user's prompt. Adherence is relative, minor variations are acceptable.\n"
+                "You are evaluating if a generated image adheres to a user's prompt. "
                 "Focus on identifying significant deviations:\n"
-                "- Are there major elements *missing* from the image description that were *explicitly requested* in the original prompt?\n"
-                "- Are there prominent elements *present* in the image description that were *not requested* or implied by the original prompt?\n"
-                "- Are there *large, significant differences* in key elements between the prompt and the image (e.g., wrong subject, wrong scene)?\n"
-                "If none of these significant deviations are clearly present, then respond with ONLY this exact phrase: '{self.adherence_phrase}'.\n"
-                "Otherwise, if there are significant deviations, suggest a revised prompt that would better guide the image generation model to produce the desired image.\n"
+                "- Missing major elements explicitly requested\n"
+                "- Unexpected prominent elements\n"
+                "- Large differences in key elements\n"
+                f"If no significant deviations, respond with: '{self.adherence_phrase}'\n"
+                "Otherwise, suggest a revised prompt.\n\n"
                 f"Original Prompt: {original_prompt}\n"
                 f"Image Description: {evaluation_text}\n"
-                "Analysis and Refinement Suggestion:"
+                "Analysis and Refinement:"
             )
 
             response = self.model.generate_content(prompt_instruction)
             response.resolve()
 
-            if response.text:
-                refined_prompt_content = response.text
-                logger.info(f"Prompt refined: {refined_prompt_content}")
-                await self._save_refined_prompt(prompt_id, original_prompt, evaluation_text, refined_prompt_content)
-                return refined_prompt_content
-            else:
-                logger.warning("No refined prompt received from Gemini API, returning original.")
+            if not response.text:
+                logger.warning("No response from Gemini API")
                 return original_prompt
 
+            refined_content = response.text
+            await self._save_refined_prompt(
+                prompt_id,
+                original_prompt,
+                evaluation_text,
+                refined_content,
+                needs_refinement
+            )
+
+            return refined_content
+
         except Exception as e:
-            logger.error(f"Error refining prompt with Gemini API: {str(e)}")
-            return "Error during prompt refinement."
+            logger.error(f"Error in prompt refinement: {str(e)}")
+            return original_prompt
+
+    async def setup(self):
+        """Ensure required directories exist."""
+        (self.data_base_path / "refined_prompts").mkdir(parents=True, exist_ok=True)
+
+    async def cleanup(self):
+        """Cleanup resources."""
+        pass
+
+    async def __aenter__(self):
+        await self.setup()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.cleanup()

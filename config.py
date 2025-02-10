@@ -3,88 +3,178 @@ from pathlib import Path
 from dotenv import load_dotenv
 import logging.config
 from typing import Dict, Any
+import sqlite3
 
-# Load environment variables from .env.local
+# Load environment variables
 load_dotenv('.env.local')
 
-# API Keys
+class DatabaseConfig:
+    """Database configuration and connection management."""
+    
+    def __init__(self, db_path: str = "image_generation.db"):
+        self.db_path = db_path
+        self._connection = None
+
+    @property
+    def connection(self):
+        if self._connection is None:
+            self._connection = sqlite3.connect(self.db_path)
+            self._connection.row_factory = sqlite3.Row
+        return self._connection
+
+    def close(self):
+        if self._connection:
+            self._connection.close()
+            self._connection = None
+
+# API Keys and Validation
 FAL_KEY = os.getenv('FAL_KEY')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+
 if not FAL_KEY:
     raise ValueError("FAL_KEY not found in .env.local")
-
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY not found in .env.local")
 
-# File Paths
+# Path Configuration
 PROJECT_ROOT = Path(__file__).parent
 INPUT_FILE_PATH = PROJECT_ROOT / "data" / "inputs" / "prompts.json"
 OUTPUT_BASE_PATH = PROJECT_ROOT / "data" / "outputs"
 
+# Database Configuration
+DATABASE_CONFIG = {
+    "path": "image_generation.db",
+    "timeout": 30,
+    "max_connections": 5,
+    "retry_attempts": 3,
+    "retry_delay": 1.0
+}
+
 # API Configuration
-FAL_API_URL = "https://fal.run/fal-ai/fast-sdxl"
-FAL_API_TIMEOUT = 60  # seconds
-FAL_MAX_RETRIES = 3
-FAL_RETRY_DELAY = 60  # seconds
+API_CONFIG = {
+    "fal": {
+        "url": "https://fal.run/fal-ai/fast-sdxl",
+        "timeout": 60,
+        "max_retries": 3,
+        "retry_delay": 60,
+        "batch_size": 3
+    },
+    "gemini": {
+        "timeout": 30,
+        "max_retries": 3,
+        "retry_delay": 30
+    }
+}
+
+# API Rate Limits
+API_LIMITS = {
+    "fal": {
+        "max_retries": 3,
+        "concurrent_limit": 5,
+        "retry_delay": 1.0
+    },
+    "gemini": {
+        "max_retries": 3,
+        "concurrent_limit": 3,
+        "retry_delay": 1.0
+    }
+}
 
 # Image Generation Settings
-IMAGE_SIZE = (1024, 1024)
-BATCH_SIZE = 3
-DEFAULT_NEGATIVE_PROMPT = "blurry, low quality, distorted, deformed, ugly, bad anatomy"
-DEFAULT_NUM_INFERENCE_STEPS = 8 # Updated to a valid value: 8
-DEFAULT_GUIDANCE_SCALE = 7.5
+IMAGE_GENERATION = {
+    "size": (1024, 1024),
+    "negative_prompt": "blurry, low quality, distorted, deformed, ugly, bad anatomy",
+    "num_inference_steps": 8,
+    "guidance_scale": 7.5,
+    "batch_size": 3
+}
 
-# Rich Progress Bar Settings
-PROGRESS_REFRESH_PER_SECOND = 10
-PROGRESS_TRANSIENT = True
+# Progress Bar Settings
+PROGRESS_BAR = {
+    "refresh_per_second": 10,
+    "transient": True
+}
 
 # Logging Configuration
-LOGGING_CONFIG: Dict[str, Any] = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {
-        'standard': {
-            'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
         },
-        'rich': {
-            'format': '%(message)s'
+        "rich": {
+            "format": "%(message)s"
         }
     },
-    'handlers': {
-        'console': {
-            'class': 'rich.logging.RichHandler',
-            'formatter': 'rich',
-            'rich_tracebacks': True,
-            'tracebacks_show_locals': True,
+    "handlers": {
+        "console": {
+            "class": "rich.logging.RichHandler",
+            "formatter": "rich",
+            "rich_tracebacks": True,
+            "tracebacks_show_locals": True,
         },
-        'file': {
-            'class': 'logging.FileHandler',
-            'filename': f'generation_log_{os.getenv("RUN_ID", "default")}.log',
-            'formatter': 'standard',
+        "file": {
+            "class": "logging.FileHandler",
+            "filename": f'generation_log_{os.getenv("RUN_ID", "default")}.log',
+            "formatter": "standard",
+        },
+        "error_file": {
+            "class": "logging.FileHandler",
+            "filename": "error.log",
+            "formatter": "standard",
+            "level": "ERROR"
         }
     },
-    'loggers': {
-        '': {  # root logger
-            'handlers': ['console', 'file'],
-            'level': os.getenv('LOG_LEVEL', 'INFO'),
-            'propagate': True
+    "loggers": {
+        "": {
+            "handlers": ["console", "file", "error_file"],
+            "level": os.getenv("LOG_LEVEL", "INFO"),
+            "propagate": True
         }
     }
 }
 
-# Thread/Process Pool Settings
-MAX_WORKERS = 4
-PROCESS_POOL_WORKERS = 2
+# Performance Settings
+PERFORMANCE = {
+    "max_workers": 4,
+    "process_pool_workers": 2,
+    "thread_pool_workers": 4,
+    "chunk_size": 1000
+}
 
-# API Retry Settings
-RETRY_MULTIPLIER = 1
-RETRY_MIN_SECONDS = 4
-RETRY_MAX_SECONDS = 10
-MAX_RETRY_ATTEMPTS = 3
+# Error Recovery Settings
+ERROR_RECOVERY = {
+    "max_attempts": 3,
+    "base_delay": 1,
+    "max_delay": 60,
+    "exponential_base": 2
+}
+
+# Convenience aliases for backward compatibility
+IMAGE_SIZE = IMAGE_GENERATION["size"]
+BATCH_SIZE = IMAGE_GENERATION["batch_size"]
+DEFAULT_NEGATIVE_PROMPT = IMAGE_GENERATION["negative_prompt"]
+DEFAULT_NUM_INFERENCE_STEPS = IMAGE_GENERATION["num_inference_steps"]
+DEFAULT_GUIDANCE_SCALE = IMAGE_GENERATION["guidance_scale"]
+
+# Initialize database configuration
+db_config = DatabaseConfig(DATABASE_CONFIG["path"])
 
 # Create necessary directories
-INPUT_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-OUTPUT_BASE_PATH.mkdir(parents=True, exist_ok=True)
+def ensure_directories():
+    """Create all necessary directories."""
+    directories = [
+        INPUT_FILE_PATH.parent,
+        OUTPUT_BASE_PATH,
+        OUTPUT_BASE_PATH / "images",
+        OUTPUT_BASE_PATH / "evaluations",
+        OUTPUT_BASE_PATH / "refined_prompts",
+        OUTPUT_BASE_PATH / "logs"
+    ]
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
 
-# Initialize logging
+# Initialize
+ensure_directories()
 logging.config.dictConfig(LOGGING_CONFIG)

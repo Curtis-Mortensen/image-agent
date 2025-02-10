@@ -2,52 +2,122 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import Optional, Dict, List # Explicitly include List and Dict
+from typing import Optional, Dict, List
 import signal
+import sqlite3
 import click
 from datetime import datetime
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskID
 from rich.logging import RichHandler
 from PIL import Image
-import aiofiles # Import aiofiles for async file operations
-from concurrent.futures import ProcessPoolExecutor # Import ProcessPoolExecutor
+import aiofiles
+from concurrent.futures import ProcessPoolExecutor
 
-from src.image_generator import ImageGenerator # Import ImageGenerator
-from src.prompt_handler import PromptHandler # Import PromptHandler
-from src.image_evaluator import ImageEvaluator # Import ImageEvaluator
-from src.prompt_refiner import PromptRefiner # Import PromptRefiner
+from src.image_generator import ImageGenerator
+from src.prompt_handler import PromptHandler
+from src.image_evaluator import ImageEvaluator
+from src.prompt_refiner import PromptRefiner
 from config import FAL_KEY, GEMINI_API_KEY, INPUT_FILE_PATH, OUTPUT_BASE_PATH
 
-# Configure rich console
 console = Console()
-
-# Configure logging with rich
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
-    handlers=[
-        RichHandler(console=console, rich_tracebacks=True),
-        logging.FileHandler(f"generation_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-    ]
+    handlers=[RichHandler(console=console, rich_tracebacks=True)]
 )
 logger = logging.getLogger(__name__)
 
-class ImageGenerationPipeline:
-    """Orchestrates the image generation pipeline."""
+class DatabaseManager:
+    def __init__(self, input_file_path: Path, output_base_path: Path,
+             fal_api_key: str, gemini_api_key: str, db_path: str = "image_generation.db"):
+        self.db = DatabaseManager(db_path)
+        self.prompt_handler = PromptHandler(input_file_path, output_base_path, db_path)
+        self.image_generator = ImageGenerator(fal_api_key, output_base_path, db_path)
+        self.image_evaluator = ImageEvaluator(gemini_api_key, db_path)
+        self.prompt_refiner = PromptRefiner(gemini_api_key, output_base_path, 
+                                      self.prompt_handler, db_path)
 
+
+def _create_tables(self):
+    with sqlite3.connect(self.db_path) as conn:
+        conn.executescript("""
+            -- Core tables
+            CREATE TABLE IF NOT EXISTS scenes (
+                id TEXT PRIMARY KEY,
+                original_prompt TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                current_iteration INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS iterations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scene_id TEXT,
+                version INTEGER,
+                prompt TEXT NOT NULL,
+                image_path TEXT,
+                evaluation_text TEXT,
+                needs_refinement BOOLEAN,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (scene_id) REFERENCES scenes(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS status (
+                scene_id TEXT PRIMARY KEY,
+                current_version INTEGER,
+                is_complete BOOLEAN DEFAULT FALSE,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (scene_id) REFERENCES scenes(id)
+            );
+
+            -- API tracking tables
+            CREATE TABLE IF NOT EXISTS api_calls (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                api_name TEXT NOT NULL,
+                endpoint TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            -- Version tracking
+            CREATE TABLE IF NOT EXISTS version_info (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                version TEXT NOT NULL,
+                installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+    async def save_iteration(self, scene_id: str, version: int, prompt: str, 
+                           image_path: str, evaluation: Optional[Dict] = None):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT INTO iterations (scene_id, version, prompt, image_path, evaluation_text)
+                VALUES (?, ?, ?, ?, ?)
+            """, (scene_id, version, prompt, str(image_path), 
+                  evaluation['evaluation_text'] if evaluation else None))
+            conn.execute("""
+                UPDATE scenes SET current_iteration = ?
+                WHERE id = ?
+            """, (version, scene_id))
+
+    async def get_scene_status(self, scene_id: str) -> Dict:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT current_iteration, status FROM scenes WHERE id = ?
+            """, (scene_id,))
+            return dict(cursor.fetchone())
+
+class ImageGenerationPipeline:
     def __init__(self, input_file_path: Path, output_base_path: Path,
                  fal_api_key: str, gemini_api_key: str):
-        """Initialize the pipeline with rich progress tracking."""
+        self.db = DatabaseManager()
         self.prompt_handler = PromptHandler(input_file_path, output_base_path)
-        self.image_generator = ImageGenerator( # Removed Gemini and PromptHandler deps
-            fal_api_key=fal_api_key,
-            output_base_path=output_base_path,
-        )
-        self.image_evaluator = ImageEvaluator(gemini_api_key) # Initialize here
-        self.prompt_refiner = PromptRefiner(gemini_api_key, output_base_path, self.prompt_handler) # Initialize here
+        self.image_generator = ImageGenerator(fal_api_key, output_base_path)
+        self.image_evaluator = ImageEvaluator(gemini_api_key)
+        self.prompt_refiner = PromptRefiner(gemini_api_key, output_base_path, self.prompt_handler)
         self.running = True
-        self.tasks: List[asyncio.Task] = []
         self.progress = Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -58,255 +128,169 @@ class ImageGenerationPipeline:
         self.process_pool = ProcessPoolExecutor(max_workers=2)
 
     def setup_signal_handlers(self):
-        """Set up graceful shutdown handlers."""
         for sig in (signal.SIGTERM, signal.SIGINT):
             signal.signal(sig, self._signal_handler)
 
     def _signal_handler(self, signum, frame):
-        """Handle shutdown signals with cleanup."""
         logger.info(f"Received signal {signum}. Starting graceful shutdown...")
         self.running = False
-        for task in self.tasks:
-            task.cancel()
         self.process_pool.shutdown(wait=False)
-
-    async def generate_image_for_prompt(self, prompt_id: str, prompt_data: dict, iteration: int, progress_task: TaskID) -> bool: # Renamed and refactored from process_iteration
-        """Generate a single image iteration and save results."""
+    
+    async def process_iteration(self, prompt_id: str, prompt_data: dict, 
+                              iteration: int, progress_task: TaskID) -> bool:
+        """Combined generation, evaluation, and refinement for one iteration."""
         try:
-            def update_progress(message: str):
-                self.progress.update(progress_task, description=message)
-
             # Generate image
             image_path = await self.image_generator.process_prompt(
-                prompt_id,
-                prompt_data,
-                iteration=iteration,
-                progress_callback=update_progress
+                prompt_id, prompt_data, iteration,
+                lambda msg: self.progress.update(progress_task, description=msg)
             )
             if not image_path:
                 return False
 
-            # Save results - use PromptHandler instance
-            if self.prompt_handler:
-                await self.prompt_handler.save_results(
-                    prompt_id=prompt_id,
-                    iteration=iteration,
-                    image_path=image_path,
-                    prompt=prompt_data['prompt'], # Or get full prompt data if needed
-                    evaluation=None # No evaluation at this stage
-                )
-            else:
-                logger.error("PromptHandler not initialized in ImageGenerationPipeline. Cannot save results.")
+            # Evaluate image
+            evaluation = await self.image_evaluator.evaluate_image(Image.open(image_path))
+            if not evaluation:
                 return False
+
+            # Save iteration data
+            await self.db.save_iteration(
+                prompt_id, iteration, prompt_data['prompt'],
+                str(image_path), evaluation
+            )
+
+            # Refine prompt if needed and not final iteration
+            if iteration < 3 and evaluation.get('needs_refinement'):
+                refined_prompt = await self.prompt_refiner.refine_prompt(
+                    prompt_data['prompt'], prompt_id, evaluation
+                )
+                if refined_prompt:
+                    prompt_data['prompt'] = refined_prompt
+
             return True
 
-
-        except asyncio.CancelledError:
-            logger.warning(f"Processing cancelled for prompt {prompt_id}, iteration {iteration}")
-            raise
         except Exception as e:
-            logger.error(f"Error processing prompt {prompt_id}, iteration {iteration}: {str(e)}", exc_info=True)
+            logger.error(f"Error in iteration {iteration} for {prompt_id}: {str(e)}")
             return False
 
-    async def evaluate_generated_image(self, prompt_id: str, image_path: Path, progress_task: TaskID) -> Optional[Dict]: # New function for evaluation
-        """Evaluate a generated image and return evaluation results."""
+    async def run_pipeline(self, batch_only: bool = False) -> None:
+        """Unified pipeline runner for both batch and full processing."""
         try:
-            def update_progress(message: str):
-                self.progress.update(progress_task, description=message)
-            self.progress.update(progress_task, description=f"Evaluating image for {prompt_id}")
-            evaluation = await self.image_evaluator.evaluate_image(Image.open(image_path))
-            return evaluation
-
-        except asyncio.CancelledError:
-            logger.warning(f"Evaluation cancelled for prompt {prompt_id}")
-            raise
-        except Exception as e:
-            logger.error(f"Error during image evaluation for prompt {prompt_id}: {str(e)}", exc_info=True)
-            return None
-
-    async def refine_prompt_based_on_evaluation(self, prompt_id: str, original_prompt: str, evaluation: Dict, progress_task: TaskID) -> Optional[str]: # New function for prompt refinement
-        """Refine a prompt based on image evaluation and return refined prompt."""
-        try:
-            def update_progress(message: str):
-                self.progress.update(progress_task, description=message)
-            self.progress.update(progress_task, description=f"Refining prompt for {prompt_id}")
-            refined_prompt = await self.prompt_refiner.refine_prompt(original_prompt, prompt_id, evaluation)
-            return refined_prompt
-
-        except asyncio.CancelledError:
-            logger.warning(f"Prompt refinement cancelled for prompt {prompt_id}")
-            raise
-        except Exception as e:
-            logger.error(f"Error during prompt refinement for prompt {prompt_id}: {str(e)}", exc_info=True)
-            return None
-
-
-    async def run_full_pipeline(self) -> None:
-        """Runs the full image generation, evaluation, and refinement pipeline (up to 3 iterations)."""
-        try:
-            async with self.prompt_handler, self.image_generator, self.image_evaluator, self.prompt_refiner:
+            async with self.prompt_handler, self.image_generator:
                 prompts = await self.prompt_handler.load_prompts()
                 if not prompts:
-                    logger.error("No prompts found. Exiting.")
+                    logger.error("No prompts found.")
                     return
 
-                total_prompts = len(prompts)
-                logger.info(f"Starting Full Image Generation Pipeline for {total_prompts} prompts, up to 3 iterations each")
+                max_iterations = 1 if batch_only else 3
+                logger.info(f"Starting pipeline for {len(prompts)} prompts, "
+                          f"max {max_iterations} iterations{'(batch mode)' if batch_only else ''}")
+
+                await self.image_evaluator.setup()
+                await self.prompt_refiner.setup()
 
                 for prompt_id, prompt_data in prompts.items():
                     if not self.running:
                         break
-                    logger.info(f"Processing prompt: {prompt_id}")
-                    prompt_progress_task = self.progress.add_task(f"Pipeline for Prompt {prompt_id}", total=3) # Up to 3 iterations in pipeline
-                    current_prompt_data = prompt_data # Start with initial prompt data
 
-                    for iteration in range(1, 4): # Run up to 3 iterations for full pipeline
-                        logger.info(f"Starting iteration {iteration} for prompt {prompt_id}")
-
-                        # 1. Generate Image
-                        if not await self.generate_image_for_prompt(prompt_id, current_prompt_data, iteration, prompt_progress_task): # Call renamed function
-                            logger.error(f"Image generation failed for prompt {prompt_id}, iteration {iteration}. Stopping pipeline for this prompt.")
+                    task = self.progress.add_task(
+                        f"Processing {prompt_id}", total=max_iterations
+                    )
+                    
+                    for iteration in range(1, max_iterations + 1):
+                        if not await self.process_iteration(
+                            prompt_id, prompt_data, iteration, task
+                        ):
                             break
+                        self.progress.update(task, advance=1)
 
-                        # 2. Evaluate Image
-                        image_path = OUTPUT_BASE_PATH / "images" / f"{prompt_id}_iteration_{iteration}.png" # Construct image path for evaluation
-                        evaluation = await self.evaluate_generated_image(prompt_id, image_path, prompt_progress_task)
-                        if not evaluation:
-                            logger.error(f"Image evaluation failed for prompt {prompt_id}, iteration {iteration}. Stopping pipeline for this prompt.")
-                            break
+                logger.info("Pipeline completed successfully.")
 
-                        # 3. Refine Prompt (for iterations 1 and 2)
-                        if iteration < 3: # Refine only for first 2 iterations
-                            refined_prompt = await self.refine_prompt_based_on_evaluation(prompt_id, current_prompt_data['prompt'], evaluation, prompt_progress_task)
-                            if refined_prompt and "No refinement needed" not in refined_prompt:
-                                current_prompt_data['prompt'] = refined_prompt # Update prompt data with refined prompt for next iteration
-                                logger.info(f"Prompt refined for iteration {iteration+1}: {refined_prompt}")
-                            else:
-                                logger.info(f"No prompt refinement needed or refinement failed for iteration {iteration}.")
-                        else:
-                            logger.info(f"No prompt refinement in the final iteration {iteration}.")
-
-
-                        self.progress.update(prompt_progress_task, advance=1) # Advance progress bar for each iteration step
-
-                    logger.info(f"Full pipeline completed for prompt {prompt_id}.")
-
-                logger.info("Full Image Generation Pipeline completed successfully for all prompts.")
-
-        except asyncio.CancelledError:
-            logger.info("Full Image Generation Pipeline cancelled - starting cleanup")
         except Exception as e:
-            logger.error(f"Full Image Generation Pipeline failed: {str(e)}", exc_info=True)
+            logger.error(f"Pipeline failed: {str(e)}")
         finally:
+            await self.image_evaluator.cleanup()
+            await self.prompt_refiner.cleanup()
             self.process_pool.shutdown(wait=True)
 
-
-# --- Interactive Commands ---
-
-async def evaluate_image_command():
-    """Evaluates an existing image using Gemini API, saving results to outputs/evaluations."""
-    default_image_path = OUTPUT_BASE_PATH / "images" / "scene_001_iteration_2.png" # Updated default image path - no scene_001 subfolder
-    image_path_str = input(f"Enter the path to the image to evaluate (default: {default_image_path}): ")
-
-    if not image_path_str:
-        image_path = default_image_path
-    else:
-        image_path = Path(image_path_str)
-
-    if not image_path.exists() or not image_path.is_file():
-        print("Invalid image path. Please provide a valid file path.")
-        return
-
-    pipeline = ImageGenerationPipeline( # Need pipeline to access evaluator
-        input_file_path=INPUT_FILE_PATH,
-        output_base_path=OUTPUT_BASE_PATH,
-        fal_api_key=FAL_KEY,
-        gemini_api_key=GEMINI_API_KEY
-    )
-    await pipeline.image_evaluator.setup() # Setup evaluator explicitly
+async def evaluate_single_image(pipeline: ImageGenerationPipeline, image_path: Path):
+    """Evaluate a single image on demand."""
     try:
-        evaluation_progress = pipeline.progress.add_task("Evaluating image...", total=1) # Add progress task
-        evaluation_result = await pipeline.evaluate_generated_image("user_provided_image", image_path, evaluation_progress) # Use new evaluate function
-        pipeline.progress.update(evaluation_progress, advance=1) # Complete progress
-
-        if evaluation_result:
-            print("\nEvaluation Result:")
-            print(evaluation_result['evaluation_text'])
-
-            # Save evaluation to outputs/evaluations - no scene_001 subfolder
-            evaluation_dir = OUTPUT_BASE_PATH / "evaluations" # Updated evaluation dir - no scene_001 subfolder
-            await aiofiles.os.makedirs(evaluation_dir, exist_ok=True) # Ensure dir exists
-            evaluation_file_path = evaluation_dir / f"{image_path.name}.evaluation.txt" # Use image_path.name to keep filename
-            async with aiofiles.open(evaluation_file_path, 'w') as f:
-                await f.write(evaluation_result['evaluation_text'])
-            print(f"Evaluation saved to: {evaluation_file_path}")
-
-        else:
-            print("Image evaluation failed.")
+        await pipeline.image_evaluator.setup()
+        task = pipeline.progress.add_task("Evaluating image", total=1)
+        
+        evaluation = await pipeline.image_evaluator.evaluate_image(Image.open(image_path))
+        if evaluation:
+            console.print("\n[green]Evaluation Result:[/green]")
+            console.print(evaluation['evaluation_text'])
+            
+            eval_path = image_path.parent / f"{image_path.stem}_evaluation.txt"
+            async with aiofiles.open(eval_path, 'w') as f:
+                await f.write(evaluation['evaluation_text'])
+            console.print(f"\nEvaluation saved to: {eval_path}")
+        
+        pipeline.progress.update(task, advance=1)
     finally:
-        await pipeline.image_evaluator.cleanup() # Cleanup evaluator explicitly
+        await pipeline.image_evaluator.cleanup()
 
-async def refine_prompt_command():
-    """Refines a prompt using Gemini API based on evaluation of an image."""
-    original_prompt = input("Enter the original prompt you want to refine: ")
-    evaluation_text = input("Enter the evaluation text for the generated image: ")
-
-    pipeline = ImageGenerationPipeline( # Need pipeline to access refiner
-        input_file_path=INPUT_FILE_PATH,
-        output_base_path=OUTPUT_BASE_PATH,
-        fal_api_key=FAL_KEY,
-        gemini_api_key=GEMINI_API_KEY
-    )
-    await pipeline.prompt_refiner.setup() # Setup refiner explicitly
+async def refine_single_prompt(pipeline: ImageGenerationPipeline, 
+                             prompt: str, evaluation: str):
+    """Refine a single prompt on demand."""
     try:
-        refinement_progress = pipeline.progress.add_task("Refining prompt...", total=1) # Add progress task
-        refined_prompt = await pipeline.prompt_refiner.refine_prompt(original_prompt, "user_prompt", {'evaluation_text': evaluation_text}) # Use refiner from pipeline
-        pipeline.progress.update(refinement_progress, advance=1) # Complete progress
-        if refined_prompt:
-            print("\nRefined Prompt:")
-            print(refined_prompt)
-        else:
-            print("Prompt refinement failed.")
+        await pipeline.prompt_refiner.setup()
+        task = pipeline.progress.add_task("Refining prompt", total=1)
+        
+        refined = await pipeline.prompt_refiner.refine_prompt(
+            prompt, "manual_prompt", {'evaluation_text': evaluation}
+        )
+        if refined:
+            console.print("\n[green]Refined Prompt:[/green]")
+            console.print(refined)
+        
+        pipeline.progress.update(task, advance=1)
     finally:
-        await pipeline.prompt_refiner.cleanup() # Cleanup refiner explicitly
+        await pipeline.prompt_refiner.cleanup()
 
-async def run_full_pipeline_command():
-    """Executes the full image generation, evaluation, and refinement pipeline (up to 3 iterations)."""
+async def main_menu():
+    """Simplified menu interface."""
     pipeline = ImageGenerationPipeline(
         input_file_path=INPUT_FILE_PATH,
         output_base_path=OUTPUT_BASE_PATH,
         fal_api_key=FAL_KEY,
         gemini_api_key=GEMINI_API_KEY
     )
-    await pipeline.run_full_pipeline() # Call run_full_pipeline for the full process
 
+    menu_options = {
+        "1": ("Batch Generation (First Iteration)", 
+              lambda: pipeline.run_pipeline(batch_only=True)),
+        "2": ("Full Pipeline (Up to 3 Iterations)", 
+              lambda: pipeline.run_pipeline(batch_only=False)),
+        "3": ("Evaluate Single Image", 
+              lambda: evaluate_single_image(pipeline, 
+                  Path(input("Enter image path: ")))),
+        "4": ("Refine Single Prompt", 
+              lambda: refine_single_prompt(pipeline,
+                  input("Enter prompt: "),
+                  input("Enter evaluation: "))),
+    }
 
-async def main_menu():
-    """Displays the main menu and handles user input."""
     while True:
-        print("\nChoose an action:")
-        print("1. Evaluate an Existing Image")
-        print("2. Refine a Prompt based on Evaluation")
-        print("3. Run Full Pipeline (Generate, Evaluate, Refine - up to 3 iterations)") # Option 4 for full pipeline
-        print("4. Exit")
+        console.print("\n[bold]Choose an action:[/bold]")
+        for key, (desc, _) in menu_options.items():
+            console.print(f"{key}. {desc}")
+        console.print("5. Exit")
 
-        choice = input("Enter your choice (1-4): ")
-
-        if choice == '1':
-            await evaluate_image_command()
-        elif choice == '2':
-            await refine_prompt_command()
-        elif choice == '3':
-            await run_full_pipeline_command() # Call new full pipeline command
-        elif choice == '4':
-            print("Exiting.")
+        choice = input("\nChoice (1-5): ")
+        if choice == "5":
             break
+        elif choice in menu_options:
+            await menu_options[choice][1]()
         else:
-            print("Invalid choice. Please enter a number between 1 and 4.")
+            console.print("[red]Invalid choice[/red]")
 
 @click.command()
 def main_cli():
-    """Runs the interactive command line interface."""
+    """CLI entry point."""
     asyncio.run(main_menu())
 
 if __name__ == '__main__':
