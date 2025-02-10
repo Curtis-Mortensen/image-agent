@@ -28,11 +28,21 @@ class APICallTracker:
     
     def __init__(self, db_path: str = DATABASE_PATH) -> None:
         self.db_path = db_path
+        self._init_db()  # Initialize DB on creation
 
     def _init_db(self) -> None:
         """Initialize the database synchronously."""
-        # Database initialization is now handled by DatabaseGenerator
-        pass
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS api_calls (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    api_name TEXT NOT NULL,
+                    endpoint TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    error TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
     async def log_call(
         self,
@@ -130,20 +140,35 @@ class FalClient:
                     )
                 )
                 
-                # Log the raw result for debugging
-                logger.debug(f"Raw API response: {result}")
-                
-                # Handle the response based on the documented structure
-                if hasattr(result, 'images') and result.images:
-                    # Convert to the expected dictionary format
-                    return {
-                        'images': [{
-                            'url': img.url
-                        } for img in result.images]
-                    }
-                
-                logger.error("No valid images in response")
-                return None
+                # Validate response
+                if not result:
+                    logger.error("Empty response from fal.run API")
+                    return None
+                    
+                if not isinstance(result, dict):
+                    logger.error(f"Unexpected response type from fal.run API: {type(result)}")
+                    return None
+                    
+                if 'images' not in result:
+                    logger.error(f"No 'images' key in response. Response keys: {result.keys()}")
+                    return None
+                    
+                if not result['images']:
+                    logger.error("Empty images list in response")
+                    return None
+                    
+                if 'url' not in result['images'][0]:
+                    logger.error(f"No 'url' in first image. Image keys: {result['images'][0].keys()}")
+                    return None
+                    
+                logger.info(f"Successfully received image URL: {result['images'][0]['url']}")
+
+                await self.call_tracker.log_call(
+                    "fal.ai", 
+                    "generate_image",
+                    "success"
+                )
+                return result
 
             except Exception as e:
                 error_msg = str(e)
