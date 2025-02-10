@@ -139,6 +139,29 @@ class FalClient:
                         on_queue_update=self._handle_status_update
                     )
                 )
+                
+                # Validate response
+                if not result:
+                    logger.error("Empty response from fal.run API")
+                    return None
+                    
+                if not isinstance(result, dict):
+                    logger.error(f"Unexpected response type from fal.run API: {type(result)}")
+                    return None
+                    
+                if 'images' not in result:
+                    logger.error(f"No 'images' key in response. Response keys: {result.keys()}")
+                    return None
+                    
+                if not result['images']:
+                    logger.error("Empty images list in response")
+                    return None
+                    
+                if 'url' not in result['images'][0]:
+                    logger.error(f"No 'url' in first image. Image keys: {result['images'][0].keys()}")
+                    return None
+                    
+                logger.info(f"Successfully received image URL: {result['images'][0]['url']}")
 
                 await self.call_tracker.log_call(
                     "fal.ai", 

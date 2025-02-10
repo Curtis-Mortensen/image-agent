@@ -8,6 +8,7 @@ from datetime import datetime
 import os
 import sqlite3
 from config import DATABASE_PATH
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +46,17 @@ class ImageGenerator:
     async def _save_generation_record(self, prompt_id: str, iteration: int, 
                                     image_path: str, prompt_text: str):
         """Save generation record to database."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                INSERT INTO generated_images 
-                (prompt_id, iteration, image_path, prompt_text)
-                VALUES (?, ?, ?, ?)
-            """, (prompt_id, iteration, str(image_path), prompt_text))
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO generated_images 
+                    (prompt_id, iteration, image_path, prompt_text)
+                    VALUES (?, ?, ?, ?)
+                """, (prompt_id, iteration, str(image_path), prompt_text))
+                logger.debug(f"Saved/updated generation record for {prompt_id}, iteration {iteration}")
+        except Exception as e:
+            logger.error(f"Error saving generation record: {str(e)}")
+            raise
 
     async def process_prompt(self, prompt_id: str, prompt_data: dict,
                            iteration: int, 
@@ -85,20 +91,58 @@ class ImageGenerator:
         """Generate and save image."""
         try:
             result = await self.fal_client.generate_image(prompt, **kwargs)
-            if not result or 'images' not in result or not result['images']:
+            if not result:
+                logger.error("No result received from API")
+                return None
+                
+            if 'images' not in result:
+                logger.error(f"No 'images' in API response. Response: {result}")
+                return None
+                
+            if not result['images']:
+                logger.error("Empty images list in API response")
+                return None
+
+            image_data = result['images'][0]
+            if not image_data:
+                logger.error("First image data is empty")
+                return None
+                
+            if 'url' not in image_data:
+                logger.error(f"No 'url' in image data. Image data: {image_data}")
                 return None
 
             output_dir = self.output_base_path / "images"
             output_dir.mkdir(parents=True, exist_ok=True)
             image_path = output_dir / f"{prompt_id}_iteration_{iteration}.png"
 
-            # Save image
-            image_data = result['images'][0]
-            binary_data = base64.b64decode(image_data.get('content', ''))
-            with open(image_path, 'wb') as f:
-                f.write(binary_data)
+            # Save image from URL
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(image_data['url']) as response:
+                        if response.status != 200:
+                            logger.error(f"Failed to download image from URL: {response.status}")
+                            return None
+                            
+                        image_content = await response.read()
+                        if not image_content:
+                            logger.error("Downloaded image content is empty")
+                            return None
+                            
+                        with open(image_path, 'wb') as f:
+                            f.write(image_content)
+                            f.flush()  # Ensure data is written to disk
+                            
+                        if not image_path.exists() or image_path.stat().st_size == 0:
+                            logger.error(f"Image file not created or empty at {image_path}")
+                            return None
+                            
+                        logger.info(f"Successfully saved image to {image_path} ({image_path.stat().st_size} bytes)")
+                        return image_path
 
-            return image_path if image_path.exists() else None
+            except Exception as e:
+                logger.error(f"Error saving image file: {str(e)}")
+                return None
 
         except Exception as e:
             logger.error(f"Image generation error: {str(e)}")
