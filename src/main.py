@@ -29,15 +29,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class DatabaseManager:
-    def __init__(self, input_file_path: Path, output_base_path: Path,
-             fal_api_key: str, gemini_api_key: str, db_path: str = "image_generation.db"):
-        self.db = DatabaseManager(db_path)
-        self.prompt_handler = PromptHandler(input_file_path, output_base_path, db_path)
-        self.image_generator = ImageGenerator(fal_api_key, output_base_path, db_path)
-        self.image_evaluator = ImageEvaluator(gemini_api_key, db_path)
-        self.prompt_refiner = PromptRefiner(gemini_api_key, output_base_path, 
-                                      self.prompt_handler, db_path)
-
+    def __init__(self, db_path: str = "image_generation.db"):
+        self.db_path = db_path
+        self.conn = None
+        self._create_tables()
 
 def _create_tables(self):
     with sqlite3.connect(self.db_path) as conn:
@@ -111,8 +106,8 @@ def _create_tables(self):
 
 class ImageGenerationPipeline:
     def __init__(self, input_file_path: Path, output_base_path: Path,
-                 fal_api_key: str, gemini_api_key: str):
-        self.db = DatabaseManager()
+             fal_api_key: str, gemini_api_key: str):
+        self.db = DatabaseManager(input_file_path, output_base_path, fal_api_key, gemini_api_key)
         self.prompt_handler = PromptHandler(input_file_path, output_base_path)
         self.image_generator = ImageGenerator(fal_api_key, output_base_path)
         self.image_evaluator = ImageEvaluator(gemini_api_key)
@@ -254,10 +249,10 @@ async def refine_single_prompt(pipeline: ImageGenerationPipeline,
 async def main_menu():
     """Simplified menu interface."""
     pipeline = ImageGenerationPipeline(
-        input_file_path=INPUT_FILE_PATH,
-        output_base_path=OUTPUT_BASE_PATH,
-        fal_api_key=FAL_KEY,
-        gemini_api_key=GEMINI_API_KEY
+        INPUT_FILE_PATH,
+        OUTPUT_BASE_PATH,
+        FAL_KEY,
+        GEMINI_API_KEY
     )
 
     menu_options = {
