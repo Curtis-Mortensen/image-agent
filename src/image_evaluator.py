@@ -18,24 +18,11 @@ class ImageEvaluator:
         # Initialize Gemini API
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-2.0-flash')
-        
-        # Initialize database
-        self._init_db()
 
     def _init_db(self):
         """Initialize database table for evaluation tracking."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS image_evaluations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    image_path TEXT NOT NULL,
-                    evaluation_text TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    status TEXT DEFAULT 'completed',
-                    needs_refinement BOOLEAN DEFAULT FALSE,
-                    UNIQUE(image_path)
-                )
-            """)
+        # Database initialization is now handled by DatabaseGenerator
+        pass
 
     async def _save_evaluation(self, image_path: str, evaluation_text: str, 
                              needs_refinement: bool = False):
