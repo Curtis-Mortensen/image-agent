@@ -6,9 +6,9 @@ from PIL import Image
 import fal_client
 from datetime import datetime
 
-from src.image_evaluator import ImageEvaluator # Import ImageEvaluator
-from src.prompt_refiner import PromptRefiner   # Import PromptRefiner
-from src.prompt_handler import PromptHandler # Import PromptHandler - needed for save_results
+from src.image_evaluator import ImageEvaluator
+from src.prompt_refiner import PromptRefiner
+from src.prompt_handler import PromptHandler
 
 logger = logging.getLogger(__name__)
 
@@ -16,30 +16,32 @@ class ImageGenerator:
     """Handles the complete image generation process."""
 
     def __init__(self, fal_api_key: str, gemini_api_key: str, output_base_path: Path,
-                 batch_size: int = 3, prompt_handler: PromptHandler = None): # Add PromptHandler as dependency
+                 batch_size: int = 3, prompt_handler: PromptHandler = None):
         """Initialize the image generator with API clients."""
         self.output_base_path = Path(output_base_path)
         self.batch_size = batch_size
-        self.prompt_handler = prompt_handler # Store PromptHandler
+        self.prompt_handler = prompt_handler
 
         # Initialize API clients
         fal_client.api_key = fal_api_key
         from src.api_client import FalClient
         self.fal_client = FalClient(fal_api_key)
-        self.image_evaluator = ImageEvaluator(gemini_api_key) # Use ImageEvaluator
-        self.prompt_refiner = PromptRefiner(gemini_api_key)   # Use PromptRefiner
+        self.image_evaluator = ImageEvaluator(gemini_api_key)
+        self.prompt_refiner = PromptRefiner(gemini_api_key, self.output_base_path.parent, self.prompt_handler) # Pass PromptHandler
 
     async def setup(self):
         """Initialize resources."""
         await self.fal_client.setup()
-        await self.image_evaluator.setup() # Setup evaluator
-        await self.prompt_refiner.setup()   # Setup refiner
+        await self.image_evaluator.setup()
+        await self.prompt_refiner.setup()
+        if self.prompt_refiner:
+            await self.prompt_refiner.setup()
 
     async def cleanup(self):
         """Cleanup resources."""
         await self.fal_client.cleanup()
-        await self.image_evaluator.cleanup() # Cleanup evaluator
-        await self.prompt_refiner.cleanup()   # Cleanup refiner
+        await self.image_evaluator.cleanup()
+        await self.prompt_refiner.cleanup()
 
     def _construct_full_prompt(self, prompt_data: Dict) -> str:
         """Construct the full prompt from prompt data."""
@@ -95,14 +97,6 @@ class ImageGenerator:
                                   progress_callback=None) -> Tuple[Optional[Path], Optional[Dict]]:
         """
         Complete generation process including evaluation and refinement.
-
-        Args:
-            prompt_data: Dictionary containing prompt information
-            prompt_id: Unique identifier for the prompt
-            progress_callback: Optional callback for progress updates
-
-        Returns:
-            Tuple of (final_image_path, evaluation_results)
         """
         try:
             # Initial generation
@@ -132,8 +126,8 @@ class ImageGenerator:
             if progress_callback:
                 progress_callback(f"Refining prompt for {prompt_id}")
 
-            refined_prompt = await self.refine_prompt(full_prompt, evaluation)
-            if not refined_prompt:
+            refined_prompt = await self.refine_prompt(full_prompt, prompt_id, evaluation) # Pass prompt_id
+            if not refined_prompt or "No refinement needed" in refined_prompt:
                 return initial_image, evaluation
 
             # Generate refined version
@@ -171,7 +165,7 @@ class ImageGenerator:
                 image_data = result['images'][0]  # Assuming first image
                 # Assuming image_data is base64 encoded, decode and save
                 binary_data = fal_client.base64.b64decode(image_data)
-                with open(image_path, 'wb') as f: # Image saving is here and correct
+                with open(image_path, 'wb') as f:
                     f.write(binary_data)
                 return image_path
 
@@ -184,15 +178,15 @@ class ImageGenerator:
     async def evaluate_image(self, image_path: Path) -> Optional[Dict]:
         """Evaluate an image using Gemini Vision."""
         try:
-            return await self.image_evaluator.evaluate_image(Image.open(image_path)) # Use ImageEvaluator
+            return await self.image_evaluator.evaluate_image(Image.open(image_path))
         except Exception as e:
             logger.error(f"Error evaluating image: {str(e)}")
             return None
 
-    async def refine_prompt(self, original_prompt: str, evaluation: Dict) -> Optional[str]:
+    async def refine_prompt(self, original_prompt: str, prompt_id: str, evaluation: Dict) -> Optional[str]: # Added prompt_id
         """Refine a prompt based on evaluation."""
         try:
-            return await self.prompt_refiner.refine_prompt(original_prompt, evaluation) # Use PromptRefiner
+            return await self.prompt_refiner.refine_prompt(original_prompt, prompt_id, evaluation) # Pass prompt_id
         except Exception as e:
             logger.error(f"Error refining prompt: {str(e)}")
             return None

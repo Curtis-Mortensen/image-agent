@@ -21,7 +21,7 @@ class PromptData:
     scene: str
     mood: str
     prompt: str
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> 'PromptData':
         return cls(**data)
@@ -44,7 +44,7 @@ class PromptHandler:
                         "mood": {"type": "string"},
                         "prompt": {"type": "string"}
                     },
-                    "required": ["title", "scene", "mood", "prompt"]
+                    "required": ["id", "title", "scene", "mood", "prompt"] # ID is now required
                 }
             }
         },
@@ -54,7 +54,7 @@ class PromptHandler:
     def __init__(self, input_file_path: Path, output_base_path: Path):
         """
         Initialize the prompt handler.
-        
+
         Args:
             input_file_path: Path to JSON file containing prompts
             output_base_path: Base path for saving outputs
@@ -68,6 +68,8 @@ class PromptHandler:
     async def setup(self):
         """Initialize resources and create necessary directories."""
         await aiofiles.os.makedirs(self.results_path, exist_ok=True)
+        refined_prompts_dir = self.output_base_path / "refined_prompts" # Ensure refined_prompts dir exists
+        await aiofiles.os.makedirs(refined_prompts_dir, exist_ok=True)
 
     async def cleanup(self):
         """Cleanup resources."""
@@ -76,11 +78,11 @@ class PromptHandler:
     def _validate_prompt(self, prompt_id: str, prompt_data: Dict) -> bool:
         """
         Validate prompt data structure.
-        
+
         Args:
             prompt_id: Unique identifier for the prompt
             prompt_data: Dictionary containing prompt data
-            
+
         Returns:
             bool indicating if prompt is valid
         """
@@ -95,7 +97,7 @@ class PromptHandler:
     async def load_prompts(self) -> Dict[str, Dict[str, str]]:
         """
         Load and validate prompts from input JSON file asynchronously.
-        
+
         Returns:
             Dictionary mapping prompt IDs to prompt data
         """
@@ -114,9 +116,9 @@ class PromptHandler:
                 return {}
 
             prompts = {}
-            for idx, prompt_data in enumerate(data['prompts'], 1):
-                prompt_id = str(prompt_data.get('id', f'prompt_{idx:03d}'))
-                
+            for prompt_data in data['prompts']: # Removed index based prompt_id generation
+                prompt_id = prompt_data.get('id') # Get ID directly from prompt data
+
                 if self._validate_prompt(prompt_id, prompt_data):
                     prompts[prompt_id] = prompt_data
                     # Cache the validated prompt data
@@ -150,7 +152,7 @@ class PromptHandler:
                           evaluation: Optional[Dict[str, Any]] = None) -> None:
         """
         Save generation results for a prompt iteration asynchronously.
-        
+
         Args:
             prompt_id: Unique identifier for the prompt
             iteration: Iteration number
@@ -160,7 +162,7 @@ class PromptHandler:
         """
         try:
             prompt_dir = await self._create_prompt_directory(prompt_id)
-            
+
             # Prepare results data
             results = {
                 "timestamp": datetime.now().isoformat(),
@@ -200,7 +202,7 @@ class PromptHandler:
         try:
             prompt_dir = await self._create_prompt_directory(prompt_id)
             summary_file = prompt_dir / "summary.json"
-            
+
             # Load existing summary or create new
             summary = {"prompt_id": prompt_id, "iterations": {}, "last_updated": None}
             if await aiofiles.os.path.exists(summary_file):
@@ -230,7 +232,7 @@ class PromptHandler:
         try:
             prompt_dir = self.results_path / prompt_id
             summary_file = prompt_dir / "summary.json"
-            
+
             if not await aiofiles.os.path.exists(summary_file):
                 return {
                     "prompt_id": prompt_id,
