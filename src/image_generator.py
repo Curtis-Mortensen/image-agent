@@ -23,25 +23,11 @@ class ImageGenerator:
         fal_client.api_key = fal_api_key
         from src.api_client import FalClient
         self.fal_client = FalClient(fal_api_key)
-        
-        # Ensure database table exists
-        self._init_db()
 
     def _init_db(self):
         """Initialize database table for image tracking."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS generated_images (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    prompt_id TEXT NOT NULL,
-                    iteration INTEGER NOT NULL,
-                    image_path TEXT NOT NULL,
-                    prompt_text TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    status TEXT DEFAULT 'completed',
-                    UNIQUE(prompt_id, iteration)
-                )
-            """)
+        # Database initialization is now handled by DatabaseGenerator
+        pass
 
     async def _save_generation_record(self, prompt_id: str, iteration: int, 
                                     image_path: str, prompt_text: str):
