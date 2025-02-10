@@ -27,19 +27,17 @@ class DatabaseConfig:
             self._connection.close()
             self._connection = None
 
-# API Keys and Validation
+# API Keys
 FAL_KEY = os.getenv('FAL_KEY')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
-if not FAL_KEY:
-    raise ValueError("FAL_KEY not found in .env.local")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY not found in .env.local")
+# File Paths
+INPUT_FILE_PATH = Path(os.getenv('INPUT_FILE_PATH', 'data/inputs/prompts.json'))
+OUTPUT_BASE_PATH = Path(os.getenv('OUTPUT_BASE_PATH', 'data/outputs'))
 
-# Path Configuration
-PROJECT_ROOT = Path(__file__).parent
-INPUT_FILE_PATH = PROJECT_ROOT / "data" / "inputs" / "prompts.json"
-OUTPUT_BASE_PATH = PROJECT_ROOT / "data" / "outputs"
+# Ensure directories exist
+OUTPUT_BASE_PATH.mkdir(parents=True, exist_ok=True)
+INPUT_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # Database Configuration
 DATABASE_CONFIG = {

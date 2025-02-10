@@ -33,56 +33,68 @@ class DatabaseManager:
         self.db_path = db_path
         self.conn = None
         self._create_tables()
+        self._initialize_version()
 
-def _create_tables(self):
-    with sqlite3.connect(self.db_path) as conn:
-        conn.executescript("""
-            -- Core tables
-            CREATE TABLE IF NOT EXISTS scenes (
-                id TEXT PRIMARY KEY,
-                original_prompt TEXT NOT NULL,
-                status TEXT DEFAULT 'pending',
-                current_iteration INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
+    def _initialize_version(self):
+        """Initialize version info if not already present."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT COUNT(*) FROM version_info")
+            if cursor.fetchone()[0] == 0:
+                conn.execute("""
+                    INSERT INTO version_info (version)
+                    VALUES ('1.0.0')
+                """)
+                conn.commit()
 
-            CREATE TABLE IF NOT EXISTS iterations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scene_id TEXT,
-                version INTEGER,
-                prompt TEXT NOT NULL,
-                image_path TEXT,
-                evaluation_text TEXT,
-                needs_refinement BOOLEAN,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (scene_id) REFERENCES scenes(id)
-            );
+    def _create_tables(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executescript("""
+                -- Core tables
+                CREATE TABLE IF NOT EXISTS scenes (
+                    id TEXT PRIMARY KEY,
+                    original_prompt TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    current_iteration INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
 
-            CREATE TABLE IF NOT EXISTS status (
-                scene_id TEXT PRIMARY KEY,
-                current_version INTEGER,
-                is_complete BOOLEAN DEFAULT FALSE,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (scene_id) REFERENCES scenes(id)
-            );
+                CREATE TABLE IF NOT EXISTS iterations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scene_id TEXT,
+                    version INTEGER,
+                    prompt TEXT NOT NULL,
+                    image_path TEXT,
+                    evaluation_text TEXT,
+                    needs_refinement BOOLEAN,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (scene_id) REFERENCES scenes(id)
+                );
 
-            -- API tracking tables
-            CREATE TABLE IF NOT EXISTS api_calls (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                api_name TEXT NOT NULL,
-                endpoint TEXT NOT NULL,
-                status TEXT NOT NULL,
-                error TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
+                CREATE TABLE IF NOT EXISTS status (
+                    scene_id TEXT PRIMARY KEY,
+                    current_version INTEGER,
+                    is_complete BOOLEAN DEFAULT FALSE,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (scene_id) REFERENCES scenes(id)
+                );
 
-            -- Version tracking
-            CREATE TABLE IF NOT EXISTS version_info (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                version TEXT NOT NULL,
-                installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
+                -- API tracking tables
+                CREATE TABLE IF NOT EXISTS api_calls (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    api_name TEXT NOT NULL,
+                    endpoint TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    error TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                -- Version tracking
+                CREATE TABLE IF NOT EXISTS version_info (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    version TEXT NOT NULL,
+                    installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
 
     async def save_iteration(self, scene_id: str, version: int, prompt: str, 
                            image_path: str, evaluation: Optional[Dict] = None):
@@ -107,7 +119,7 @@ def _create_tables(self):
 class ImageGenerationPipeline:
     def __init__(self, input_file_path: Path, output_base_path: Path,
              fal_api_key: str, gemini_api_key: str):
-        self.db = DatabaseManager(input_file_path, output_base_path, fal_api_key, gemini_api_key)
+        self.db = DatabaseManager(str(output_base_path / "image_generation.db"))
         self.prompt_handler = PromptHandler(input_file_path, output_base_path)
         self.image_generator = ImageGenerator(fal_api_key, output_base_path)
         self.image_evaluator = ImageEvaluator(gemini_api_key)
