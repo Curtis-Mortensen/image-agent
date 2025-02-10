@@ -81,8 +81,14 @@ async def generate_batch(pipeline: PipelineOrchestrator):
             console.print(f"\n[red]No prompt found with ID: {prompt_id}[/red]")
             return
             
-        batch_size = input("Enter batch size (3-7, default 5): ")
-        batch_size = int(batch_size) if batch_size.isdigit() else None
+        batch_size = input(f"Enter batch size (1-10, default {PIPELINE_CONFIG['batch_size']['default']}): ")
+        if batch_size.isdigit():
+            batch_size = int(batch_size)
+            if batch_size < PIPELINE_CONFIG['batch_size']['min'] or batch_size > PIPELINE_CONFIG['batch_size']['max']:
+                console.print(f"\n[red]Batch size must be between {PIPELINE_CONFIG['batch_size']['min']} and {PIPELINE_CONFIG['batch_size']['max']}[/red]")
+                return
+        else:
+            batch_size = PIPELINE_CONFIG['batch_size']['default']
         
         with create_progress() as progress:
             task = progress.add_task("Generating batch", total=1)

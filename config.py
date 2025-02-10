@@ -26,8 +26,8 @@ DATABASE_PATH = BASE_DIR / "data/database/image_generation.db"
 PIPELINE_CONFIG = {
     "max_iterations": 3,
     "batch_size": {
-        "min": 3,
-        "max": 7,
+        "min": 1,
+        "max": 10,
         "default": 5
     },
     "quality_threshold": 0.7,  # Minimum score for a variant to be considered good
