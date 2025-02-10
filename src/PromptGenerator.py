@@ -2,7 +2,7 @@ from typing import Dict, Any
 import json
 from pathlib import Path
 import asyncio
-from src.api_client import GeminiClient
+from src.APIClient import GeminiClient
 import logging
 
 logger = logging.getLogger(__name__)

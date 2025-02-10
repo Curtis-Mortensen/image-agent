@@ -1,3 +1,7 @@
+"""
+Configuration settings for the image generation pipeline.
+"""
+
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -6,75 +10,80 @@ from typing import Dict, Any
 import sqlite3
 
 # Load environment variables
-load_dotenv('.env.local')
+load_dotenv()
 
-# API Keys
-FAL_KEY = os.getenv('FAL_KEY')
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+# API Keys and Authentication
+FAL_KEY = os.getenv("FAL_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # File Paths
-INPUT_FILE_PATH = Path(os.getenv('INPUT_FILE_PATH', 'data/inputs/prompts.json'))
-OUTPUT_BASE_PATH = Path(os.getenv('OUTPUT_BASE_PATH', 'data/outputs'))
+BASE_DIR = Path(__file__).parent
+INPUT_FILE_PATH = BASE_DIR / "data/inputs/prompts.json"
+OUTPUT_BASE_PATH = BASE_DIR / "data/outputs"
+DATABASE_PATH = BASE_DIR / "data/database/image_generation.db"
 
-# Ensure directories exist
-OUTPUT_BASE_PATH.mkdir(parents=True, exist_ok=True)
-INPUT_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-# Database Configuration
-DATABASE_CONFIG = {
-    "path": str(OUTPUT_BASE_PATH / "image_generation.db"),
-    "timeout": 30,
-    "max_connections": 5,
-    "retry_attempts": 3,
-    "retry_delay": 1.0
-}
-
-# Create a convenience variable for the database path
-DATABASE_PATH = DATABASE_CONFIG["path"]
-
-# API Configuration
-API_CONFIG = {
-    "fal": {
-        "url": "https://fal.run/fal-ai/fast-sdxl",
-        "timeout": 60,
-        "max_retries": 3,
-        "retry_delay": 60,
-        "batch_size": 3
+# Pipeline Configuration
+PIPELINE_CONFIG = {
+    "max_iterations": 3,
+    "batch_size": {
+        "min": 3,
+        "max": 7,
+        "default": 5
     },
-    "gemini": {
-        "timeout": 30,
-        "max_retries": 3,
-        "retry_delay": 30
-    }
-}
-
-# API Rate Limits
-API_LIMITS = {
-    "fal": {
-        "max_retries": 3,
-        "concurrent_limit": 5,
-        "retry_delay": 1.0
-    },
-    "gemini": {
-        "max_retries": 3,
-        "concurrent_limit": 3,
-        "retry_delay": 1.0
-    }
+    "quality_threshold": 0.7,  # Minimum score for a variant to be considered good
+    "refinement_threshold": 0.85,  # Score above which refinement is not needed
 }
 
 # Image Generation Settings
 IMAGE_GENERATION = {
-    "size": (1024, 1024),
+    "size": {
+        "width": 1024,
+        "height": 1024
+    },
     "negative_prompt": "blurry, low quality, distorted, deformed, ugly, bad anatomy",
-    "num_inference_steps": 8,
+    "num_inference_steps": 30,
     "guidance_scale": 7.5,
-    "batch_size": 3
+    "model": {
+        "default": "fal-ai/fast-lightning-sdxl",
+        "alternatives": [
+            "stabilityai/stable-diffusion-xl-base-1.0",
+            "runwayml/stable-diffusion-v1-5"
+        ]
+    }
 }
 
-# Progress Bar Settings
-PROGRESS_BAR = {
-    "refresh_per_second": 10,
-    "transient": True
+# Database Settings
+DATABASE_CONFIG = {
+    "version": "1.0.0",
+    "tables": {
+        "generated_images": {
+            "columns": [
+                "id INTEGER PRIMARY KEY AUTOINCREMENT",
+                "prompt_id TEXT",
+                "iteration INTEGER",
+                "variant INTEGER",
+                "image_path TEXT UNIQUE",
+                "prompt_text TEXT",
+                "evaluation_text TEXT",
+                "evaluation_score REAL",
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            ],
+            "indices": [
+                "CREATE INDEX IF NOT EXISTS idx_prompt_iter ON generated_images(prompt_id, iteration)",
+                "CREATE INDEX IF NOT EXISTS idx_evaluation_score ON generated_images(evaluation_score)"
+            ]
+        },
+        "best_images": {
+            "columns": [
+                "prompt_id TEXT",
+                "iteration INTEGER",
+                "best_image_id INTEGER",
+                "evaluation_score REAL",
+                "FOREIGN KEY(best_image_id) REFERENCES generated_images(id)",
+                "PRIMARY KEY(prompt_id, iteration)"
+            ]
+        }
+    }
 }
 
 # Logging Configuration
@@ -135,10 +144,33 @@ ERROR_RECOVERY = {
 
 # Convenience aliases for backward compatibility
 IMAGE_SIZE = IMAGE_GENERATION["size"]
-BATCH_SIZE = IMAGE_GENERATION["batch_size"]
+BATCH_SIZE = PIPELINE_CONFIG["batch_size"]["default"]  # Default batch size
 DEFAULT_NEGATIVE_PROMPT = IMAGE_GENERATION["negative_prompt"]
 DEFAULT_NUM_INFERENCE_STEPS = IMAGE_GENERATION["num_inference_steps"]
 DEFAULT_GUIDANCE_SCALE = IMAGE_GENERATION["guidance_scale"]
 
-# Initialize
+# Multi-Variant Pipeline Settings
+PIPELINE_CONFIG = {
+    "max_iterations": 3,
+    "batch_size": 5,  # Number of variants per iteration
+    "quality_threshold": 0.7,  # Minimum score for a variant to be considered good
+    "refinement_threshold": 0.85,  # Score above which refinement is not needed
+    "naming": {
+        "image_format": "{prompt_id}_iter{iteration}_v{variant}.png",
+        "symlink_format": "current/{prompt_id}.png"
+    }
+}
+
+# Update Image Generation settings to align with pipeline
+IMAGE_GENERATION.update({
+    "batch_size": PIPELINE_CONFIG["batch_size"]  # Ensure consistency
+})
+
+# Add new convenience aliases
+MAX_ITERATIONS = PIPELINE_CONFIG["max_iterations"]
+BATCH_SIZE = PIPELINE_CONFIG["batch_size"]  # Override the previous BATCH_SIZE
+QUALITY_THRESHOLD = PIPELINE_CONFIG["quality_threshold"]
+REFINEMENT_THRESHOLD = PIPELINE_CONFIG["refinement_threshold"]
+
+# Initialize logging
 logging.config.dictConfig(LOGGING_CONFIG)

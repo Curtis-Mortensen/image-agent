@@ -9,6 +9,8 @@ import os
 import sqlite3
 from config import DATABASE_PATH
 import aiohttp
+from src.PromptHandler import PromptHandler
+from src.APIClient import FalClient
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,6 @@ class ImageGenerator:
         
         # Initialize FAL client
         fal_client.api_key = fal_api_key
-        from src.api_client import FalClient
         self.fal_client = FalClient(fal_api_key)
 
     def _init_db(self):
@@ -30,16 +31,17 @@ class ImageGenerator:
         pass
 
     async def _save_generation_record(self, prompt_id: str, iteration: int, 
-                                    image_path: str, prompt_text: str):
+                                    variant: int, image_path: str, prompt_text: str):
         """Save generation record to database."""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("""
                     INSERT OR REPLACE INTO generated_images 
-                    (prompt_id, iteration, image_path, prompt_text)
-                    VALUES (?, ?, ?, ?)
-                """, (prompt_id, iteration, str(image_path), prompt_text))
-                logger.debug(f"Saved/updated generation record for {prompt_id}, iteration {iteration}")
+                    (prompt_id, iteration, variant, image_path, prompt_text)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (prompt_id, iteration, variant, str(image_path), prompt_text))
+                logger.debug(f"Saved generation record for {prompt_id}, "
+                           f"iteration {iteration}, variant {variant}")
         except Exception as e:
             logger.error(f"Error saving generation record: {str(e)}")
             raise
@@ -61,7 +63,7 @@ class ImageGenerator:
 
             if image_path:
                 await self._save_generation_record(
-                    prompt_id, iteration, str(image_path), full_prompt
+                    prompt_id, iteration, 0, str(image_path), full_prompt
                 )
                 logger.info(f"Generated image for {prompt_id}, iteration {iteration}")
                 return image_path
@@ -73,57 +75,46 @@ class ImageGenerator:
             return None
 
     async def generate_image(self, prompt: str, prompt_id: str,
-                           iteration: int = 1, **kwargs) -> Optional[Path]:
-        """Generate and save image."""
+                           iteration: int = 1, variant: int = 0, **kwargs) -> Optional[Path]:
+        """Generate and save a single image variant."""
         try:
             result = await self.fal_client.generate_image(prompt, **kwargs)
-            if not result:
-                logger.error("No result received from API")
-                return None
-                
-            if 'images' not in result:
-                logger.error(f"No 'images' in API response. Response: {result}")
-                return None
-                
-            if not result['images']:
-                logger.error("Empty images list in API response")
+            if not result or 'images' not in result or not result['images']:
+                logger.error("Invalid or empty response from API")
                 return None
 
             image_data = result['images'][0]
-            if not image_data:
-                logger.error("First image data is empty")
-                return None
-                
-            if 'url' not in image_data:
-                logger.error(f"No 'url' in image data. Image data: {image_data}")
+            if not image_data or 'url' not in image_data:
+                logger.error("Invalid image data in response")
                 return None
 
             output_dir = self.output_base_path / "images"
             output_dir.mkdir(parents=True, exist_ok=True)
-            image_path = output_dir / f"{prompt_id}_iteration_{iteration}.png"
+            
+            # New naming convention: {prompt_id}_iter{iteration}_v{variant}.png
+            image_path = output_dir / f"{prompt_id}_iter{iteration}_v{variant}.png"
 
-            # Save image from URL
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(image_data['url']) as response:
                         if response.status != 200:
-                            logger.error(f"Failed to download image from URL: {response.status}")
+                            logger.error(f"Failed to download image: {response.status}")
                             return None
                             
                         image_content = await response.read()
                         if not image_content:
-                            logger.error("Downloaded image content is empty")
+                            logger.error("Empty image content")
                             return None
                             
                         with open(image_path, 'wb') as f:
                             f.write(image_content)
-                            f.flush()  # Ensure data is written to disk
+                            f.flush()
                             
                         if not image_path.exists() or image_path.stat().st_size == 0:
-                            logger.error(f"Image file not created or empty at {image_path}")
+                            logger.error(f"Image file not created or empty")
                             return None
                             
-                        logger.info(f"Successfully saved image to {image_path} ({image_path.stat().st_size} bytes)")
+                        logger.info(f"Saved image to {image_path}")
                         return image_path
 
             except Exception as e:
@@ -147,10 +138,10 @@ class ImageGenerator:
         """Retrieve generation history for a prompt."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("""
-                SELECT iteration, image_path, created_at, status
+                SELECT iteration, variant, image_path, created_at, status, evaluation_score
                 FROM generated_images
                 WHERE prompt_id = ?
-                ORDER BY iteration
+                ORDER BY iteration, variant
             """, (prompt_id,))
             return cursor.fetchall()
 

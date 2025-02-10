@@ -19,13 +19,13 @@ from typing import Dict, Any
 from pathlib import Path
 
 # Core components
-from src.image_generator import ImageGenerator
-from src.prompt_handler import PromptHandler
-from src.api_client import FalClient, GeminiClient
-from src.image_evaluator import ImageEvaluator
-from src.prompt_refiner import PromptRefiner
-from src.main import ImageGenerationPipeline
-from src.database_generator import DatabaseGenerator, initialize_database
+from src.ImageGenerator import ImageGenerator
+from src.PromptHandler import PromptHandler
+from src.APIClient import FalClient, GeminiClient
+from src.ImageVision import ImageVision
+from src.PromptRefiner import PromptRefiner
+from src.PromptGenerator import PromptGenerator
+from src.DatabaseGenerator import DatabaseGenerator, initialize_database
 from config import DATABASE_PATH
 
 # Package metadata
@@ -34,9 +34,9 @@ __all__ = [
     "PromptHandler",
     "FalClient",
     "GeminiClient",
-    "ImageEvaluator",
+    "ImageVision",
     "PromptRefiner",
-    "ImageGenerationPipeline",
+    "PromptGenerator",
     "DatabaseGenerator",
     "initialize_database",
     "get_version_info"

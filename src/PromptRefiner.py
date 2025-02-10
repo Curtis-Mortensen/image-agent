@@ -6,7 +6,7 @@ from pathlib import Path
 from datetime import datetime
 from config import DATABASE_PATH
 
-from src.prompt_handler import PromptHandler
+from src.PromptHandler import PromptHandler
 
 logger = logging.getLogger(__name__)
 
