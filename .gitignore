@@ -33,7 +33,8 @@ wheels/
 # Input/Output data
 prompts.json
 data/inputs/*.json
-data/outputs/
+data/outputs/images
+data/outputs/evaluations
 
 # Logs
 *.log
