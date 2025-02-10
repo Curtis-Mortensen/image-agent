@@ -16,7 +16,6 @@ __license__ = "MIT"
 
 import logging
 from typing import Dict, Any
-import sqlite3
 from pathlib import Path
 
 # Core components
@@ -26,6 +25,7 @@ from src.api_client import FalClient, GeminiClient
 from src.image_evaluator import ImageEvaluator
 from src.prompt_refiner import PromptRefiner
 from src.main import ImageGenerationPipeline
+from src.database_generator import DatabaseGenerator, initialize_database
 from config import DATABASE_PATH
 
 # Package metadata
@@ -37,51 +37,28 @@ __all__ = [
     "ImageEvaluator",
     "PromptRefiner",
     "ImageGenerationPipeline",
+    "DatabaseGenerator",
     "initialize_database",
     "get_version_info"
 ]
 
-def initialize_database(db_path: str = DATABASE_PATH) -> None:
-    """Initialize the SQLite database with all required tables."""
-    with sqlite3.connect(db_path) as conn:
-        conn.executescript("""
-            -- Version tracking
-            CREATE TABLE IF NOT EXISTS version_info (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                version TEXT NOT NULL,
-                installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-        
-        # Insert current version
-        conn.execute("INSERT OR IGNORE INTO version_info (version) VALUES (?)", 
-                    (__version__,))
-
 def get_version_info() -> Dict[str, Any]:
     """Get package version and database information."""
     try:
-        with sqlite3.connect(DATABASE_PATH) as conn:
-            cursor = conn.execute("""
-                SELECT version, installed_at 
-                FROM version_info 
-                ORDER BY installed_at DESC 
-                LIMIT 1
-            """)
-            db_version = cursor.fetchone()
+        generator = DatabaseGenerator()
+        db_version = generator.get_version()
             
-            return {
-                "package_version": __version__,
-                "database_version": db_version[0] if db_version else None,
-                "installed_at": db_version[1] if db_version else None,
-                "author": __author__,
-                "license": __license__
-            }
+        return {
+            "package_version": __version__,
+            "database_version": db_version,
+            "author": __author__,
+            "license": __license__
+        }
     except Exception as e:
         logging.error(f"Error getting version info: {str(e)}")
         return {
             "package_version": __version__,
             "database_version": None,
-            "installed_at": None,
             "author": __author__,
             "license": __license__
         }
