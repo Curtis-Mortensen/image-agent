@@ -11,6 +11,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskID
 from rich.logging import RichHandler
 from PIL import Image
 import aiofiles # Import aiofiles for async file operations
+from concurrent.futures import ProcessPoolExecutor # Import ProcessPoolExecutor
 
 from src.image_generator import ImageGenerator # Import ImageGenerator
 from src.prompt_handler import PromptHandler # Import PromptHandler
