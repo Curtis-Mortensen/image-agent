@@ -22,6 +22,7 @@ from config import (
     FAL_KEY, GEMINI_API_KEY, INPUT_FILE_PATH, 
     OUTPUT_BASE_PATH, DATABASE_PATH
 )
+from src.prompt_generator import PromptGenerator
 
 console = Console()
 logging.basicConfig(
@@ -35,75 +36,19 @@ class DatabaseManager:
     def __init__(self, db_path: str = DATABASE_PATH):
         self.db_path = db_path
         self.conn = None
-        self._init_database()
+        # Database initialization is now handled by DatabaseGenerator
+        from src.database_generator import initialize_database
+        initialize_database(self.db_path)
 
     def _init_database(self):
         """Initialize the database and all its tables."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                # First create version_info table separately
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS version_info (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        version TEXT NOT NULL,
-                        installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                
-                # Initialize version if needed
-                cursor = conn.execute("SELECT COUNT(*) FROM version_info")
-                if cursor.fetchone()[0] == 0:
-                    conn.execute("INSERT INTO version_info (version) VALUES ('1.0.0')")
-                    conn.commit()
-                
-                # Now create all other tables
-                self._create_tables(conn)
-        except Exception as e:
-            logger.error(f"Database initialization failed: {str(e)}")
-            raise
+        # Database initialization is now handled by DatabaseGenerator
+        pass
 
     def _create_tables(self, conn):
         """Create all tables except version_info."""
-        conn.executescript("""
-            -- Core tables
-            CREATE TABLE IF NOT EXISTS scenes (
-                id TEXT PRIMARY KEY,
-                original_prompt TEXT NOT NULL,
-                status TEXT DEFAULT 'pending',
-                current_iteration INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS iterations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scene_id TEXT,
-                version INTEGER,
-                prompt TEXT NOT NULL,
-                image_path TEXT,
-                evaluation_text TEXT,
-                needs_refinement BOOLEAN,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (scene_id) REFERENCES scenes(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS status (
-                scene_id TEXT PRIMARY KEY,
-                current_version INTEGER,
-                is_complete BOOLEAN DEFAULT FALSE,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (scene_id) REFERENCES scenes(id)
-            );
-
-            -- API tracking tables
-            CREATE TABLE IF NOT EXISTS api_calls (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                api_name TEXT NOT NULL,
-                endpoint TEXT NOT NULL,
-                status TEXT NOT NULL,
-                error TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
+        # Database initialization is now handled by DatabaseGenerator
+        pass
 
     async def save_iteration(self, scene_id: str, version: int, prompt: str, 
                            image_path: str, evaluation: Optional[Dict] = None):
@@ -267,6 +212,42 @@ async def refine_single_prompt(pipeline: ImageGenerationPipeline,
     finally:
         await pipeline.prompt_refiner.cleanup()
 
+async def generate_prompts(pipeline: ImageGenerationPipeline):
+    """Generate prompts for scenes that don't have them and load into database."""
+    try:
+        generator = PromptGenerator(GEMINI_API_KEY)
+        task = pipeline.progress.add_task("Processing prompts", total=100)
+        
+        def update_progress(message: str):
+            pipeline.progress.update(task, description=message)
+        
+        # Generate prompts and update JSON file
+        stats = await generator.update_json_file(
+            INPUT_FILE_PATH, 
+            progress_callback=update_progress
+        )
+        
+        # Show generation statistics
+        console.print("\n[bold]Prompt Generation Results:[/bold]")
+        console.print(f"Total scenes: {stats['total_scenes']}")
+        console.print(f"New prompts generated: {stats['scenes_generated']}")
+        console.print(f"Existing prompts: {stats['scenes_existing']}")
+        
+        pipeline.progress.update(task, advance=50, description="Loading prompts into database")
+        
+        # Reload prompts into database
+        async with pipeline.prompt_handler:
+            prompts = await pipeline.prompt_handler.load_prompts()
+            if prompts:
+                console.print(f"\n[green]Successfully loaded {len(prompts)} prompts into database[/green]")
+            else:
+                console.print("\n[red]No prompts were loaded into database[/red]")
+        
+        pipeline.progress.update(task, advance=50, description="Complete")
+        
+    except Exception as e:
+        console.print(f"\n[red]Error generating prompts: {str(e)}[/red]")
+
 async def main_menu():
     """Simplified menu interface."""
     pipeline = ImageGenerationPipeline(
@@ -277,14 +258,16 @@ async def main_menu():
     )
 
     menu_options = {
-        "1": ("Batch Generation (First Iteration)", 
+        "1": ("Generate Missing Prompts", 
+              lambda: generate_prompts(pipeline)),
+        "2": ("Batch Generation (First Iteration)", 
               lambda: pipeline.run_pipeline(batch_only=True)),
-        "2": ("Full Pipeline (Up to 3 Iterations)", 
+        "3": ("Full Pipeline (Up to 3 Iterations)", 
               lambda: pipeline.run_pipeline(batch_only=False)),
-        "3": ("Evaluate Single Image", 
+        "4": ("Evaluate Single Image", 
               lambda: evaluate_single_image(pipeline, 
                   Path(input("Enter image path: ")))),
-        "4": ("Refine Single Prompt", 
+        "5": ("Refine Single Prompt", 
               lambda: refine_single_prompt(pipeline,
                   input("Enter prompt: "),
                   input("Enter evaluation: "))),
@@ -294,10 +277,10 @@ async def main_menu():
         console.print("\n[bold]Choose an action:[/bold]")
         for key, (desc, _) in menu_options.items():
             console.print(f"{key}. {desc}")
-        console.print("5. Exit")
+        console.print("6. Exit")
 
-        choice = input("\nChoice (1-5): ")
-        if choice == "5":
+        choice = input("\nChoice (1-6): ")
+        if choice == "6":
             break
         elif choice in menu_options:
             await menu_options[choice][1]()
@@ -308,6 +291,10 @@ async def main_menu():
 def main_cli():
     """CLI entry point."""
     asyncio.run(main_menu())
+
+async def main():
+    generator = PromptGenerator(GEMINI_API_KEY)
+    await generator.update_json_file(INPUT_FILE_PATH)
 
 if __name__ == '__main__':
     main_cli()
