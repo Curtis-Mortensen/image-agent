@@ -215,17 +215,24 @@ async def refine_single_prompt(pipeline: ImageGenerationPipeline,
 async def generate_prompts(pipeline: ImageGenerationPipeline):
     """Generate prompts for scenes that don't have them and load into database."""
     try:
+        logger.info("Starting prompt generation process...")
         generator = PromptGenerator(GEMINI_API_KEY)
+        logger.info("Created PromptGenerator instance")
+        
         task = pipeline.progress.add_task("Processing prompts", total=100)
+        logger.info("Added progress task")
         
         def update_progress(message: str):
+            logger.info(f"Progress update: {message}")
             pipeline.progress.update(task, description=message)
         
+        logger.info(f"About to process input file: {INPUT_FILE_PATH}")
         # Generate prompts and update JSON file
         stats = await generator.update_json_file(
             INPUT_FILE_PATH, 
             progress_callback=update_progress
         )
+        logger.info(f"Completed JSON file update with stats: {stats}")
         
         # Show generation statistics
         console.print("\n[bold]Prompt Generation Results:[/bold]")
@@ -234,58 +241,81 @@ async def generate_prompts(pipeline: ImageGenerationPipeline):
         console.print(f"Existing prompts: {stats['scenes_existing']}")
         
         pipeline.progress.update(task, advance=50, description="Loading prompts into database")
+        logger.info("Starting database load")
         
         # Reload prompts into database
         async with pipeline.prompt_handler:
             prompts = await pipeline.prompt_handler.load_prompts()
             if prompts:
                 console.print(f"\n[green]Successfully loaded {len(prompts)} prompts into database[/green]")
+                logger.info(f"Loaded {len(prompts)} prompts into database")
             else:
                 console.print("\n[red]No prompts were loaded into database[/red]")
+                logger.error("No prompts were loaded into database")
         
         pipeline.progress.update(task, advance=50, description="Complete")
+        logger.info("Prompt generation process completed")
         
     except Exception as e:
+        logger.error(f"Error in generate_prompts: {str(e)}", exc_info=True)
         console.print(f"\n[red]Error generating prompts: {str(e)}[/red]")
 
 async def main_menu():
     """Simplified menu interface."""
-    pipeline = ImageGenerationPipeline(
-        INPUT_FILE_PATH,
-        OUTPUT_BASE_PATH,
-        FAL_KEY,
-        GEMINI_API_KEY
-    )
+    try:
+        logger.info("Initializing pipeline...")
+        pipeline = ImageGenerationPipeline(
+            INPUT_FILE_PATH,
+            OUTPUT_BASE_PATH,
+            FAL_KEY,
+            GEMINI_API_KEY
+        )
+        logger.info(f"Pipeline initialized with FAL_KEY={FAL_KEY[:8]}... and GEMINI_API_KEY={GEMINI_API_KEY[:8]}...")
 
-    menu_options = {
-        "1": ("Generate Missing Prompts", 
-              lambda: generate_prompts(pipeline)),
-        "2": ("Batch Generation (First Iteration)", 
-              lambda: pipeline.run_pipeline(batch_only=True)),
-        "3": ("Full Pipeline (Up to 3 Iterations)", 
-              lambda: pipeline.run_pipeline(batch_only=False)),
-        "4": ("Evaluate Single Image", 
-              lambda: evaluate_single_image(pipeline, 
-                  Path(input("Enter image path: ")))),
-        "5": ("Refine Single Prompt", 
-              lambda: refine_single_prompt(pipeline,
-                  input("Enter prompt: "),
-                  input("Enter evaluation: "))),
-    }
+        menu_options = {
+            "1": ("Generate Missing Prompts", 
+                generate_prompts),
+            "2": ("Batch Generation (First Iteration)", 
+                pipeline.run_pipeline),
+            "3": ("Full Pipeline (Up to 3 Iterations)", 
+                lambda: pipeline.run_pipeline(batch_only=False)),
+            "4": ("Evaluate Single Image", 
+                lambda: evaluate_single_image(pipeline, 
+                    Path(input("Enter image path: ")))),
+            "5": ("Refine Single Prompt", 
+                lambda: refine_single_prompt(pipeline,
+                    input("Enter prompt: "),
+                    input("Enter evaluation: "))),
+        }
 
-    while True:
-        console.print("\n[bold]Choose an action:[/bold]")
-        for key, (desc, _) in menu_options.items():
-            console.print(f"{key}. {desc}")
-        console.print("6. Exit")
+        while True:
+            console.print("\n[bold]Choose an action:[/bold]")
+            for key, (desc, _) in menu_options.items():
+                console.print(f"{key}. {desc}")
+            console.print("6. Exit")
 
-        choice = input("\nChoice (1-6): ")
-        if choice == "6":
-            break
-        elif choice in menu_options:
-            await menu_options[choice][1]()
-        else:
-            console.print("[red]Invalid choice[/red]")
+            choice = input("\nChoice (1-6): ")
+            if choice == "6":
+                break
+            elif choice in menu_options:
+                try:
+                    func = menu_options[choice][1]
+                    # Create a new progress context for each operation
+                    with pipeline.progress:
+                        if choice == "1":
+                            await func(pipeline)
+                        elif choice == "2":
+                            await func(batch_only=True)
+                        else:
+                            await func()
+                except Exception as e:
+                    logger.error(f"Error executing option {choice}: {str(e)}", exc_info=True)
+                    console.print(f"\n[red]Error: {str(e)}[/red]")
+            else:
+                console.print("[red]Invalid choice[/red]")
+    except Exception as e:
+        logger.error(f"Error in main menu: {str(e)}", exc_info=True)
+        console.print(f"\n[red]Error initializing: {str(e)}[/red]")
 
 @click.command()
 def main_cli():
