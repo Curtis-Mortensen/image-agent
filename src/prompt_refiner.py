@@ -24,26 +24,11 @@ class PromptRefiner:
         # Initialize Gemini API
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-2.0-flash')
-        
-        # Initialize database
-        self._init_db()
 
     def _init_db(self):
         """Initialize database table for refined prompts."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS refined_prompts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    original_prompt_id TEXT NOT NULL,
-                    iteration INTEGER NOT NULL,
-                    refined_prompt TEXT NOT NULL,
-                    evaluation_text TEXT NOT NULL,
-                    needs_refinement BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (original_prompt_id) REFERENCES prompts(id),
-                    UNIQUE(original_prompt_id, iteration)
-                )
-            """)
+        # Database initialization is now handled by DatabaseGenerator
+        pass
 
     async def _save_refined_prompt(self, prompt_id: str, original_prompt: str,
                                  evaluation_text: str, refined_content: str,
