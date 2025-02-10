@@ -26,11 +26,12 @@ logger = logging.getLogger(__name__)
 class APICallTracker:
     """Tracks API calls and rate limits."""
     
-    def __init__(self, db_path: str = DATABASE_PATH):
+    def __init__(self, db_path: str = DATABASE_PATH) -> None:
         self.db_path = db_path
-        self._init_db()
+        self._init_db()  # Initialize DB on creation
 
-    def _init_db(self):
+    def _init_db(self) -> None:
+        """Initialize the database synchronously."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS api_calls (
@@ -43,23 +44,43 @@ class APICallTracker:
                 )
             """)
 
-    async def log_call(self, api_name: str, endpoint: str, 
-                      status: str = "success", error: str = None):
+    async def log_call(
+        self,
+        api_name: str,
+        endpoint: str,
+        status: str = "success",
+        error: Optional[str] = None
+    ) -> None:
+        """Log an API call to the database.
+
+        Args:
+            api_name: Name of the API service
+            endpoint: Specific endpoint called
+            status: Status of the call (success/error)
+            error: Error message if status is error
+        """
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO api_calls (api_name, endpoint, status, error)
                 VALUES (?, ?, ?, ?)
-            """, (api_name, endpoint, status, error))
+                """,
+                (api_name, endpoint, status, error)
+            )
 
 class FalClient:
     """Client for interacting with the fal.ai API with enhanced tracking."""
 
-    def __init__(self, api_key: str, timeout: int = 60, 
-                 db_path: str = DATABASE_PATH):
+    def __init__(
+        self,
+        api_key: str,
+        timeout: int = 60,
+        db_path: str = DATABASE_PATH
+    ) -> None:
         self.api_key = api_key
-        self.timeout = timeout
-        self.db_path = db_path
-        self.tracker = APICallTracker(db_path)
+        self.timeout = ClientTimeout(total=timeout)
+        self.call_tracker = APICallTracker(db_path)  # This initializes DB
+        self.session: Optional[aiohttp.ClientSession] = None
         fal_client.api_key = api_key
         
         # Add rate limiting parameters
@@ -67,8 +88,23 @@ class FalClient:
         self.retry_delay = 1.0
         self.concurrent_limit = asyncio.Semaphore(5)  # Limit concurrent requests
 
-    def _handle_status_update(self, update):
-        """Handle status updates from FAL.ai."""
+    async def setup(self) -> None:
+        """Initialize resources."""
+        if self.session is None:
+            self.session = aiohttp.ClientSession(timeout=self.timeout)
+
+    async def cleanup(self) -> None:
+        """Cleanup resources."""
+        if self.session:
+            await self.session.close()
+            self.session = None
+
+    def _handle_status_update(self, update: Any) -> None:
+        """Handle status updates from FAL.ai.
+        
+        Args:
+            update: Status update from FAL.ai
+        """
         if isinstance(update, fal_client.InProgress):
             for log in update.logs:
                 logger.debug(f"Generation progress: {log['message']}")
@@ -104,7 +140,7 @@ class FalClient:
                     )
                 )
 
-                await self.tracker.log_call(
+                await self.call_tracker.log_call(
                     "fal.ai", 
                     "generate_image",
                     "success"
@@ -114,7 +150,7 @@ class FalClient:
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Image generation error: {error_msg}")
-                await self.tracker.log_call(
+                await self.call_tracker.log_call(
                     "fal.ai",
                     "generate_image",
                     "error",
