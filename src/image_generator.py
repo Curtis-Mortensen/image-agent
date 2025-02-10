@@ -13,7 +13,7 @@ from src.prompt_handler import PromptHandler
 logger = logging.getLogger(__name__)
 
 class ImageGenerator:
-    """Handles the complete image generation process."""
+    """Handles image generation, saving images directly to outputs/images."""
 
     def __init__(self, fal_api_key: str, gemini_api_key: str, output_base_path: Path,
                  batch_size: int = 3, prompt_handler: PromptHandler = None):
@@ -27,7 +27,7 @@ class ImageGenerator:
         from src.api_client import FalClient
         self.fal_client = FalClient(fal_api_key)
         self.image_evaluator = ImageEvaluator(gemini_api_key)
-        self.prompt_refiner = PromptRefiner(gemini_api_key, self.output_base_path.parent, self.prompt_handler) # Pass PromptHandler
+        self.prompt_refiner = PromptRefiner(gemini_api_key, self.output_base_path.parent, self.prompt_handler)
 
     async def setup(self):
         """Initialize resources."""
@@ -126,7 +126,7 @@ class ImageGenerator:
             if progress_callback:
                 progress_callback(f"Refining prompt for {prompt_id}")
 
-            refined_prompt = await self.refine_prompt(full_prompt, prompt_id, evaluation) # Pass prompt_id
+            refined_prompt = await self.refine_prompt(full_prompt, prompt_id, evaluation)
             if not refined_prompt or "No refinement needed" in refined_prompt:
                 return initial_image, evaluation
 
@@ -149,16 +149,16 @@ class ImageGenerator:
 
     async def generate_image(self, prompt: str, prompt_id: str,
                            iteration: int = 1, **kwargs) -> Optional[Path]:
-        """Generate a single image."""
+        """Generate a single image, saving directly to outputs/images."""
         try:
             result = await self.fal_client.generate_image(prompt, **kwargs)
             if not result:
                 return None
 
-            # Save the image
-            output_dir = self.output_base_path / prompt_id
+            # Save the image directly to outputs/images
+            output_dir = self.output_base_path / "images" # Updated output path: no prompt_id subfolder
             output_dir.mkdir(parents=True, exist_ok=True)
-            image_path = output_dir / f"iteration_{iteration}.png"
+            image_path = output_dir / f"{prompt_id}_iteration_{iteration}.png" # Include prompt_id in filename
 
             # Save image data
             if 'images' in result and result['images']:
@@ -183,10 +183,10 @@ class ImageGenerator:
             logger.error(f"Error evaluating image: {str(e)}")
             return None
 
-    async def refine_prompt(self, original_prompt: str, prompt_id: str, evaluation: Dict) -> Optional[str]: # Added prompt_id
+    async def refine_prompt(self, original_prompt: str, prompt_id: str, evaluation: Dict) -> Optional[str]:
         """Refine a prompt based on evaluation."""
         try:
-            return await self.prompt_refiner.refine_prompt(original_prompt, prompt_id, evaluation) # Pass prompt_id
+            return await self.prompt_refiner.refine_prompt(original_prompt, prompt_id, evaluation)
         except Exception as e:
             logger.error(f"Error refining prompt: {str(e)}")
             return None

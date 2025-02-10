@@ -10,7 +10,6 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskID
 from rich.logging import RichHandler
 from PIL import Image
-from concurrent.futures import ProcessPoolExecutor # Explicitly import ProcessPoolExecutor
 import aiofiles # Import aiofiles for async file operations
 
 from src.image_generator import ImageGenerator # Import ImageGenerator
@@ -44,7 +43,7 @@ class ImageGenerationPipeline:
             fal_api_key=fal_api_key,
             gemini_api_key=gemini_api_key,
             output_base_path=output_base_path,
-            prompt_handler=self.prompt_handler # Pass PromptHandler instance
+            prompt_handler=self.prompt_handler
         )
         self.running = True
         self.tasks: List[asyncio.Task] = []
@@ -114,7 +113,7 @@ class ImageGenerationPipeline:
         successful = sum(1 for r in results if r is True)
         logger.info(f"Batch completed: {successful}/{len(results)} successful")
 
-    async def run_image_generation(self) -> None: # Renamed from run_pipeline to run_image_generation
+    async def run_image_generation(self) -> None:
         """Run the complete image generation."""
         try:
             async with self.prompt_handler, self.image_generator:
@@ -124,7 +123,7 @@ class ImageGenerationPipeline:
                     return
 
                 total_prompts = len(prompts)
-                logger.info(f"Starting Image Generation for {total_prompts} prompts") # Updated log message
+                logger.info(f"Starting Image Generation for {total_prompts} prompts")
 
                 # Directly process all prompts without batching for now, to ensure all are processed
                 for prompt_id, prompt_data in prompts.items():
@@ -133,12 +132,12 @@ class ImageGenerationPipeline:
                     logger.info(f"Processing prompt: {prompt_id}")
                     await self.process_prompt(prompt_id, prompt_data, self.progress.add_task(f"Prompt {prompt_id}", total=2)) # Assuming 2 iterations per prompt
 
-                logger.info("Image Generation completed successfully") # Updated log message
+                logger.info("Image Generation completed successfully")
 
         except asyncio.CancelledError:
-            logger.info("Image Generation cancelled - starting cleanup") # Updated log message
+            logger.info("Image Generation cancelled - starting cleanup")
         except Exception as e:
-            logger.error(f"Image Generation failed: {str(e)}", exc_info=True) # Updated log message
+            logger.error(f"Image Generation failed: {str(e)}", exc_info=True)
         finally:
             self.process_pool.shutdown(wait=True)
 
@@ -151,11 +150,11 @@ async def generate_images_command():
         fal_api_key=FAL_KEY,
         gemini_api_key=GEMINI_API_KEY
     )
-    await pipeline.run_image_generation() # Use run_image_generation here
+    await pipeline.run_image_generation()
 
 async def evaluate_image_command():
-    """Evaluates a single image using Gemini API, suggesting a default path and saving results."""
-    default_image_path = OUTPUT_BASE_PATH / "results" / "scene_001" / "iteration_2.png" # Example path
+    """Evaluates an existing image using Gemini API, saving results to outputs/evaluations."""
+    default_image_path = OUTPUT_BASE_PATH / "images" / "scene_001_iteration_2.png" # Updated default image path - no scene_001 subfolder
     image_path_str = input(f"Enter the path to the image to evaluate (default: {default_image_path}): ")
 
     if not image_path_str:
@@ -175,8 +174,10 @@ async def evaluate_image_command():
             print("\nEvaluation Result:")
             print(evaluation_result['evaluation_text'])
 
-            # Save evaluation to a file in the same directory as the image
-            evaluation_file_path = image_path.parent / f"{image_path.stem}.evaluation.txt"
+            # Save evaluation to outputs/evaluations - no scene_001 subfolder
+            evaluation_dir = OUTPUT_BASE_PATH / "evaluations" # Updated evaluation dir - no scene_001 subfolder
+            await aiofiles.os.makedirs(evaluation_dir, exist_ok=True) # Ensure dir exists
+            evaluation_file_path = evaluation_dir / f"{image_path.name}.evaluation.txt" # Use image_path.name to keep filename
             async with aiofiles.open(evaluation_file_path, 'w') as f:
                 await f.write(evaluation_result['evaluation_text'])
             print(f"Evaluation saved to: {evaluation_file_path}")
@@ -207,7 +208,7 @@ async def main_menu():
     """Displays the main menu and handles user input."""
     while True:
         print("\nChoose an action:")
-        print("1. Run Image Generation") # Option to run full pipeline
+        print("1. Run Image Generation")
         print("2. Evaluate an Existing Image")
         print("3. Refine a Prompt based on Evaluation")
         print("4. Exit")
@@ -215,7 +216,7 @@ async def main_menu():
         choice = input("Enter your choice (1-4): ")
 
         if choice == '1':
-            await generate_images_command() # Run full pipeline command
+            await generate_images_command()
         elif choice == '2':
             await evaluate_image_command()
         elif choice == '3':
@@ -227,9 +228,9 @@ async def main_menu():
             print("Invalid choice. Please enter a number between 1 and 4.")
 
 @click.command()
-def main_cli(): # Renamed from cli to main_cli to avoid conflict with main menu
+def main_cli():
     """Runs the interactive command line interface."""
     asyncio.run(main_menu())
 
 if __name__ == '__main__':
-    main_cli() # Call the main CLI function
+    main_cli()

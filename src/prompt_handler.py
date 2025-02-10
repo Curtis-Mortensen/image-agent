@@ -70,6 +70,9 @@ class PromptHandler:
         await aiofiles.os.makedirs(self.results_path, exist_ok=True)
         refined_prompts_dir = self.output_base_path / "refined_prompts" # Ensure refined_prompts dir exists
         await aiofiles.os.makedirs(refined_prompts_dir, exist_ok=True)
+        await aiofiles.os.makedirs(self.output_base_path / "images", exist_ok=True) # Ensure images dir exists
+        await aiofiles.os.makedirs(self.output_base_path / "evaluations", exist_ok=True) # Ensure evaluations dir exists
+
 
     async def cleanup(self):
         """Cleanup resources."""
@@ -140,7 +143,7 @@ class PromptHandler:
 
     async def _create_prompt_directory(self, prompt_id: str) -> Path:
         """Create and return directory for prompt outputs asynchronously."""
-        prompt_dir = self.results_path / prompt_id
+        prompt_dir = self.results_path / prompt_id # Still using results path for other outputs like json/yaml
         await aiofiles.os.makedirs(prompt_dir, exist_ok=True)
         return prompt_dir
 
@@ -152,13 +155,6 @@ class PromptHandler:
                           evaluation: Optional[Dict[str, Any]] = None) -> None:
         """
         Save generation results for a prompt iteration asynchronously.
-
-        Args:
-            prompt_id: Unique identifier for the prompt
-            iteration: Iteration number
-            image_path: Path to generated image
-            prompt: The prompt used for generation
-            evaluation: Optional evaluation results
         """
         try:
             prompt_dir = await self._create_prompt_directory(prompt_id)
