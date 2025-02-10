@@ -37,8 +37,8 @@ class PipelineOrchestrator:
         self.image_vision = ImageVision(gemini_api_key)
         self.evaluation_grader = EvaluationGrader()
         self.best_selector = BestImageSelector()
-        self.prompt_refiner = PromptRefiner(gemini_api_key, output_base_path)
         self.prompt_handler = PromptHandler(input_file_path, output_base_path)
+        self.prompt_refiner = PromptRefiner(gemini_api_key, output_base_path, self.prompt_handler)
         
         # Initialize database
         self.db_generator = DatabaseGenerator()
@@ -187,7 +187,7 @@ class PipelineOrchestrator:
 
                     for iteration in range(1, max_iterations + 1):
                         best_variant = await self.process_variants(
-                            prompt_id, prompt_data, iteration, None, task
+                            prompt_id, prompt_data, iteration, PIPELINE_CONFIG["batch_size"]["default"], task
                         )
                         
                         if not best_variant:

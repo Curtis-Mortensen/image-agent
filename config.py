@@ -41,7 +41,7 @@ IMAGE_GENERATION = {
         "height": 1024
     },
     "negative_prompt": "blurry, low quality, distorted, deformed, ugly, bad anatomy",
-    "num_inference_steps": 30,
+    "num_inference_steps": 8,  # Must be one of: 1, 2, 4, 8
     "guidance_scale": 7.5,
     "model": {
         "default": "fal-ai/fast-lightning-sdxl",
@@ -59,28 +59,68 @@ DATABASE_CONFIG = {
         "generated_images": {
             "columns": [
                 "id INTEGER PRIMARY KEY AUTOINCREMENT",
-                "prompt_id TEXT",
-                "iteration INTEGER",
-                "variant INTEGER",
+                "prompt_id TEXT NOT NULL",
+                "iteration INTEGER NOT NULL",
                 "image_path TEXT UNIQUE",
-                "prompt_text TEXT",
-                "evaluation_text TEXT",
-                "evaluation_score REAL",
-                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                "prompt_text TEXT NOT NULL",
+                "model TEXT NOT NULL",
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+                "status TEXT DEFAULT 'pending'"
             ],
             "indices": [
                 "CREATE INDEX IF NOT EXISTS idx_prompt_iter ON generated_images(prompt_id, iteration)",
-                "CREATE INDEX IF NOT EXISTS idx_evaluation_score ON generated_images(evaluation_score)"
+                "CREATE INDEX IF NOT EXISTS idx_status ON generated_images(status)"
             ]
         },
-        "best_images": {
+        "prompt_status": {
             "columns": [
-                "prompt_id TEXT",
-                "iteration INTEGER",
-                "best_image_id INTEGER",
-                "evaluation_score REAL",
-                "FOREIGN KEY(best_image_id) REFERENCES generated_images(id)",
-                "PRIMARY KEY(prompt_id, iteration)"
+                "prompt_id TEXT PRIMARY KEY",
+                "current_iteration INTEGER DEFAULT 0",
+                "status TEXT DEFAULT 'pending'",
+                "last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            ],
+            "indices": [
+                "CREATE INDEX IF NOT EXISTS idx_prompt_status ON prompt_status(status)"
+            ]
+        },
+        "prompts": {
+            "columns": [
+                "id TEXT PRIMARY KEY",
+                "title TEXT NOT NULL",
+                "scene TEXT NOT NULL",
+                "mood TEXT",
+                "prompt TEXT NOT NULL",
+                "model TEXT DEFAULT 'flux'",
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            ]
+        },
+        "refined_prompts": {
+            "columns": [
+                "id INTEGER PRIMARY KEY AUTOINCREMENT",
+                "original_prompt_id TEXT NOT NULL",
+                "iteration INTEGER NOT NULL",
+                "refined_prompt TEXT NOT NULL",
+                "evaluation_text TEXT",
+                "needs_refinement BOOLEAN DEFAULT FALSE",
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+                "FOREIGN KEY(original_prompt_id) REFERENCES prompts(id)",
+                "UNIQUE(original_prompt_id, iteration)"
+            ],
+            "indices": [
+                "CREATE INDEX IF NOT EXISTS idx_original_prompt ON refined_prompts(original_prompt_id)"
+            ]
+        },
+        "api_calls": {
+            "columns": [
+                "id INTEGER PRIMARY KEY AUTOINCREMENT",
+                "api_name TEXT",
+                "endpoint TEXT",
+                "status TEXT",
+                "error TEXT",
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            ],
+            "indices": [
+                "CREATE INDEX IF NOT EXISTS idx_api_status ON api_calls(api_name, status)"
             ]
         }
     }
@@ -149,26 +189,13 @@ DEFAULT_NEGATIVE_PROMPT = IMAGE_GENERATION["negative_prompt"]
 DEFAULT_NUM_INFERENCE_STEPS = IMAGE_GENERATION["num_inference_steps"]
 DEFAULT_GUIDANCE_SCALE = IMAGE_GENERATION["guidance_scale"]
 
-# Multi-Variant Pipeline Settings
-PIPELINE_CONFIG = {
-    "max_iterations": 3,
-    "batch_size": 5,  # Number of variants per iteration
-    "quality_threshold": 0.7,  # Minimum score for a variant to be considered good
-    "refinement_threshold": 0.85,  # Score above which refinement is not needed
-    "naming": {
-        "image_format": "{prompt_id}_iter{iteration}_v{variant}.png",
-        "symlink_format": "current/{prompt_id}.png"
-    }
-}
-
 # Update Image Generation settings to align with pipeline
 IMAGE_GENERATION.update({
-    "batch_size": PIPELINE_CONFIG["batch_size"]  # Ensure consistency
+    "batch_size": PIPELINE_CONFIG["batch_size"]["default"]  # Ensure consistency
 })
 
 # Add new convenience aliases
 MAX_ITERATIONS = PIPELINE_CONFIG["max_iterations"]
-BATCH_SIZE = PIPELINE_CONFIG["batch_size"]  # Override the previous BATCH_SIZE
 QUALITY_THRESHOLD = PIPELINE_CONFIG["quality_threshold"]
 REFINEMENT_THRESHOLD = PIPELINE_CONFIG["refinement_threshold"]
 

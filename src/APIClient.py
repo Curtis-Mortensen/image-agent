@@ -95,9 +95,32 @@ class FalClient:
         Args:
             update: Status update from FAL.ai
         """
-        if isinstance(update, fal_client.InProgress):
-            for log in update.logs:
-                logger.debug(f"Generation progress: {log['message']}")
+        try:
+            logger.debug(f"Received update of type: {type(update)}")
+            logger.debug(f"Update object attributes: {dir(update)}")
+            
+            if isinstance(update, fal_client.InProgress):
+                # Handle progress updates
+                if hasattr(update, 'logs') and update.logs:
+                    for log in update.logs:
+                        logger.debug(f"Generation progress: {log['message']}")
+            elif isinstance(update, fal_client.Completed):
+                # Handle completion
+                logger.info("Generation completed successfully")
+                logger.debug(f"Completed update full structure: {update.__dict__}")
+            elif isinstance(update, fal_client.Failed):
+                # Handle errors
+                error_msg = getattr(update, 'error', 'Unknown error')
+                logger.error(f"Generation failed: {error_msg}")
+                raise fal_client.APIError(str(error_msg))
+            elif isinstance(update, fal_client.Queued):
+                # Handle queued status
+                logger.debug("Request queued")
+            else:
+                logger.warning(f"Unknown status update type: {type(update)}")
+        except Exception as e:
+            logger.error(f"Error handling status update: {str(e)}")
+            raise
 
     @backoff.on_exception(
         backoff.expo,
@@ -119,46 +142,93 @@ class FalClient:
 
                 logger.debug(f"Generating image with parameters: {arguments}")
 
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    None,
-                    lambda: fal_client.subscribe(
+                try:
+                    # Create a future to handle the async completion
+                    future = asyncio.Future()
+                    
+                    def handle_update(update):
+                        try:
+                            self._handle_status_update(update)
+                            if isinstance(update, fal_client.Completed):
+                                if not future.done():
+                                    logger.debug(f"Completed update full structure: {update.__dict__}")
+                                    logger.debug(f"Update object dir: {dir(update)}")
+                                    # Try to access the images attribute directly
+                                    if hasattr(update, 'images'):
+                                        result_dict = {
+                                            "images": [{
+                                                "url": update.images[0].url if update.images else None
+                                            }]
+                                        }
+                                        future.set_result(result_dict)
+                                    else:
+                                        logger.error("Update object has no 'images' attribute")
+                                        future.set_exception(KeyError("No 'images' in update object"))
+                            elif isinstance(update, fal_client.Failed):
+                                if not future.done():
+                                    future.set_exception(fal_client.APIError(str(update.error)))
+                        except Exception as e:
+                            logger.error(f"Error in handle_update: {str(e)}, update type: {type(update)}")
+                            if not future.done():
+                                future.set_exception(e)
+
+                    # Start the generation process
+                    fal_client.subscribe(
                         "fal-ai/fast-lightning-sdxl",
                         arguments=arguments,
                         with_logs=True,
-                        on_queue_update=self._handle_status_update
+                        on_queue_update=handle_update
                     )
-                )
-                
-                # Validate response
-                if not result:
-                    logger.error("Empty response from fal.run API")
-                    return None
                     
-                if not isinstance(result, dict):
-                    logger.error(f"Unexpected response type from fal.run API: {type(result)}")
-                    return None
+                    # Wait for the result with a timeout
+                    try:
+                        result = await asyncio.wait_for(future, timeout=60.0)
+                    except asyncio.TimeoutError:
+                        logger.error("Generation timed out after 60 seconds")
+                        raise
                     
-                if 'images' not in result:
-                    logger.error(f"No 'images' key in response. Response keys: {result.keys()}")
-                    return None
+                    if not result:
+                        logger.error("Empty response from fal.ai API")
+                        return None
+                        
+                    # Validate response structure
+                    if not isinstance(result, dict):
+                        logger.error(f"Unexpected response type: {type(result)}")
+                        return None
+                        
+                    if 'images' not in result or not result['images']:
+                        logger.error("No images in response")
+                        return None
+                        
+                    first_image = result['images'][0]
+                    if 'url' not in first_image:
+                        logger.error("No URL in image data")
+                        return None
+                        
+                    # Log success and return the result
+                    logger.info(f"Successfully generated image: {first_image['url']}")
+                    await self.call_tracker.log_call(
+                        "fal.ai", 
+                        "generate_image",
+                        "success"
+                    )
+                    return result
                     
-                if not result['images']:
-                    logger.error("Empty images list in response")
-                    return None
-                    
-                if 'url' not in result['images'][0]:
-                    logger.error(f"No 'url' in first image. Image keys: {result['images'][0].keys()}")
-                    return None
-                    
-                logger.info(f"Successfully received image URL: {result['images'][0]['url']}")
-
-                await self.call_tracker.log_call(
-                    "fal.ai", 
-                    "generate_image",
-                    "success"
-                )
-                return result
+                except fal_client.AuthenticationError:
+                    logger.error("Invalid FAL API key")
+                    raise
+                except fal_client.RequestError as e:
+                    logger.error(f"Invalid request parameters: {str(e)}")
+                    raise
+                except fal_client.APIError as e:
+                    logger.error(f"FAL API error: {str(e)}")
+                    raise
+                except KeyError as e:
+                    logger.error(f"Unexpected response format: missing key {str(e)}")
+                    raise
+                except Exception as e:
+                    logger.error(f"Unexpected error: {str(e)}")
+                    raise
 
             except Exception as e:
                 error_msg = str(e)
