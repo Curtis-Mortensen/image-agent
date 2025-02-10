@@ -159,3 +159,9 @@ flake8 src/
 3. Commit your changes
 4. Push to the branch
 5. Create a Pull Request
+
+## Future Features
+
+- Add support for SDXL, SD 3.5, and comfyui workflow apis
+- Add multiple image generation, comparison, and selection per prompt and per iteration
+- Create meta-learning algorithm for prompt refinement
