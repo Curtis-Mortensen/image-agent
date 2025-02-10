@@ -9,13 +9,16 @@ __license__ = "MIT"
 
 from src.image_generator import ImageGenerator
 from src.prompt_handler import PromptHandler
-from src.api_client import FalClient, GeminiClient
+from src.api_client import FalClient
+from src.image_evaluator import ImageEvaluator # Import ImageEvaluator
+from src.prompt_refiner import PromptRefiner   # Import PromptRefiner
 from src.main import ImageGenerationPipeline
 
 __all__ = [
     "ImageGenerator",
     "PromptHandler",
     "FalClient",
-    "GeminiClient",
+    "ImageEvaluator", # Export ImageEvaluator
+    "PromptRefiner",   # Export PromptRefiner
     "ImageGenerationPipeline"
 ]

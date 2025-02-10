@@ -6,6 +6,69 @@
       "scene": "Deep in a mystical forest",
       "mood": "Ethereal, peaceful",
       "prompt": "A shaft of golden morning light piercing through misty ancient trees"
+    },
+    {
+      "id": "scene_002",
+      "title": "Mountain Majesty",
+      "scene": "High up in the snowy mountains",
+      "mood": "Grand, awe-inspiring",
+      "prompt": "A panoramic view of jagged peaks under a clear blue sky"
+    },
+    {
+      "id": "scene_003",
+      "title": "Ocean Dream",
+      "scene": "Under the deep blue ocean",
+      "mood": "Calm, mysterious",
+      "prompt": "A vibrant coral reef teeming with life, sunlight filtering from above"
+    },
+    {
+      "id": "scene_004",
+      "title": "Cityscape at Night",
+      "scene": "A bustling city at night",
+      "mood": "Energetic, vibrant",
+      "prompt": "Neon lights reflecting on wet streets, skyscrapers in the background"
+    },
+    {
+      "id": "scene_005",
+      "title": "Starry Sky",
+      "scene": "Remote countryside at night",
+      "mood": "Serene, infinite",
+      "prompt": "A breathtaking view of the Milky Way stretching across the night sky"
+    },
+    {
+      "id": "scene_006",
+      "title": "Desert Sunrise",
+      "scene": "Vast desert at dawn",
+      "mood": "Tranquil, hopeful",
+      "prompt": "The sun rising over sand dunes, casting long shadows"
+    },
+    {
+      "id": "scene_007",
+      "title": "Tropical Beach",
+      "scene": "Secluded tropical beach",
+      "mood": "Relaxing, idyllic",
+      "prompt": "White sand beach, clear turquoise water, palm trees swaying gently"
+    },
+    {
+      "id": "scene_008",
+      "title": "Autumn Forest",
+      "scene": "Forest in autumn",
+      "mood": "Warm, colorful",
+      "prompt": "Leaves of red, orange, and gold covering the forest floor"
+    },
+    {
+      "id": "scene_009",
+      "title": "Winter Cabin",
+      "scene": "Cozy cabin in winter",
+      "mood": "Comforting, peaceful",
+      "prompt": "Snow-covered cabin with smoke coming from the chimney, surrounded by pine trees"
+    },
+    {
+      "id": "scene_010",
+      "title": "Spring Meadow",
+      "scene": "Lush spring meadow",
+      "mood": "Fresh, lively",
+      "prompt": "Wildflowers blooming in a green meadow, butterflies fluttering around"
     }
   ]
 }
