@@ -7,6 +7,7 @@ import sqlite3
 from dataclasses import dataclass, asdict
 from jsonschema import validate, ValidationError
 import asyncio
+from config import DATABASE_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class PromptHandler:
     }
 
     def __init__(self, input_file_path: Path, output_base_path: Path, 
-                 db_path: str = "image_generation.db"):
+                 db_path: str = DATABASE_PATH):
         self.input_file_path = Path(input_file_path)
         self.output_base_path = Path(output_base_path)
         self.db_path = db_path

@@ -4,6 +4,7 @@ from typing import Optional, Dict
 import sqlite3
 from pathlib import Path
 from datetime import datetime
+from config import DATABASE_PATH
 
 from src.prompt_handler import PromptHandler
 
@@ -13,7 +14,7 @@ class PromptRefiner:
     """Handles prompt refinement using Google Gemini API with database tracking."""
 
     def __init__(self, api_key: str, data_base_path: Path, prompt_handler: PromptHandler,
-                 db_path: str = "image_generation.db"):
+                 db_path: str = DATABASE_PATH):
         self.api_key = api_key
         self.data_base_path = data_base_path
         self.prompt_handler = prompt_handler

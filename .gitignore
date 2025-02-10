@@ -45,3 +45,6 @@ data/outputs/evaluations
 *.swp
 *.swo
 .DS_Store
+
+# Database files
+*.db

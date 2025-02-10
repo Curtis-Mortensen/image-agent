@@ -7,13 +7,14 @@ import base64
 from datetime import datetime
 import os
 import sqlite3
+from config import DATABASE_PATH
 
 logger = logging.getLogger(__name__)
 
 class ImageGenerator:
     """Handles image generation with database tracking."""
 
-    def __init__(self, fal_api_key: str, output_base_path: Path, db_path: str = "image_generation.db"):
+    def __init__(self, fal_api_key: str, output_base_path: Path, db_path: str = DATABASE_PATH):
         self.output_base_path = Path(output_base_path)
         self.db_path = db_path
         

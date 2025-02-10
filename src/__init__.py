@@ -26,6 +26,7 @@ from src.api_client import FalClient, GeminiClient
 from src.image_evaluator import ImageEvaluator
 from src.prompt_refiner import PromptRefiner
 from src.main import ImageGenerationPipeline
+from config import DATABASE_PATH
 
 # Package metadata
 __all__ = [
@@ -40,7 +41,7 @@ __all__ = [
     "get_version_info"
 ]
 
-def initialize_database(db_path: str = "image_generation.db") -> None:
+def initialize_database(db_path: str = DATABASE_PATH) -> None:
     """Initialize the SQLite database with all required tables."""
     with sqlite3.connect(db_path) as conn:
         conn.executescript("""
@@ -50,11 +51,6 @@ def initialize_database(db_path: str = "image_generation.db") -> None:
                 version TEXT NOT NULL,
                 installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
-            -- Insert current version
-            INSERT INTO version_info (version) 
-            VALUES (?) 
-            ON CONFLICT DO NOTHING;
         """)
         
         # Insert current version
@@ -64,7 +60,7 @@ def initialize_database(db_path: str = "image_generation.db") -> None:
 def get_version_info() -> Dict[str, Any]:
     """Get package version and database information."""
     try:
-        with sqlite3.connect("image_generation.db") as conn:
+        with sqlite3.connect(DATABASE_PATH) as conn:
             cursor = conn.execute("""
                 SELECT version, installed_at 
                 FROM version_info 

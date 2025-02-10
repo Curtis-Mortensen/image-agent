@@ -17,7 +17,8 @@ from config import (
     DEFAULT_NUM_INFERENCE_STEPS, 
     DEFAULT_NEGATIVE_PROMPT, 
     DEFAULT_GUIDANCE_SCALE, 
-    IMAGE_SIZE
+    IMAGE_SIZE,
+    DATABASE_PATH
 )
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 class APICallTracker:
     """Tracks API calls and rate limits."""
     
-    def __init__(self, db_path: str = "image_generation.db"):
+    def __init__(self, db_path: str = DATABASE_PATH):
         self.db_path = db_path
         self._init_db()
 
@@ -54,9 +55,10 @@ class FalClient:
     """Client for interacting with the fal.ai API with enhanced tracking."""
 
     def __init__(self, api_key: str, timeout: int = 60, 
-                 db_path: str = "image_generation.db"):
+                 db_path: str = DATABASE_PATH):
         self.api_key = api_key
         self.timeout = timeout
+        self.db_path = db_path
         self.tracker = APICallTracker(db_path)
         fal_client.api_key = api_key
         
@@ -123,8 +125,9 @@ class FalClient:
 class GeminiClient:
     """Client for interacting with Google Gemini API with enhanced features."""
 
-    def __init__(self, api_key: str, db_path: str = "image_generation.db"):
+    def __init__(self, api_key: str, db_path: str = DATABASE_PATH):
         self.api_key = api_key
+        self.db_path = db_path
         self.tracker = APICallTracker(db_path)
         self.model = genai.GenerativeModel('gemini-2.0-flash')
         genai.configure(api_key=api_key)

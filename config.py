@@ -8,25 +8,6 @@ import sqlite3
 # Load environment variables
 load_dotenv('.env.local')
 
-class DatabaseConfig:
-    """Database configuration and connection management."""
-    
-    def __init__(self, db_path: str = "image_generation.db"):
-        self.db_path = db_path
-        self._connection = None
-
-    @property
-    def connection(self):
-        if self._connection is None:
-            self._connection = sqlite3.connect(self.db_path)
-            self._connection.row_factory = sqlite3.Row
-        return self._connection
-
-    def close(self):
-        if self._connection:
-            self._connection.close()
-            self._connection = None
-
 # API Keys
 FAL_KEY = os.getenv('FAL_KEY')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
@@ -41,12 +22,15 @@ INPUT_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # Database Configuration
 DATABASE_CONFIG = {
-    "path": "image_generation.db",
+    "path": str(OUTPUT_BASE_PATH / "image_generation.db"),
     "timeout": 30,
     "max_connections": 5,
     "retry_attempts": 3,
     "retry_delay": 1.0
 }
+
+# Create a convenience variable for the database path
+DATABASE_PATH = DATABASE_CONFIG["path"]
 
 # API Configuration
 API_CONFIG = {
@@ -156,23 +140,5 @@ DEFAULT_NEGATIVE_PROMPT = IMAGE_GENERATION["negative_prompt"]
 DEFAULT_NUM_INFERENCE_STEPS = IMAGE_GENERATION["num_inference_steps"]
 DEFAULT_GUIDANCE_SCALE = IMAGE_GENERATION["guidance_scale"]
 
-# Initialize database configuration
-db_config = DatabaseConfig(DATABASE_CONFIG["path"])
-
-# Create necessary directories
-def ensure_directories():
-    """Create all necessary directories."""
-    directories = [
-        INPUT_FILE_PATH.parent,
-        OUTPUT_BASE_PATH,
-        OUTPUT_BASE_PATH / "images",
-        OUTPUT_BASE_PATH / "evaluations",
-        OUTPUT_BASE_PATH / "refined_prompts",
-        OUTPUT_BASE_PATH / "logs"
-    ]
-    for directory in directories:
-        directory.mkdir(parents=True, exist_ok=True)
-
 # Initialize
-ensure_directories()
 logging.config.dictConfig(LOGGING_CONFIG)

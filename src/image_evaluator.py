@@ -4,13 +4,14 @@ from typing import Optional, Dict
 from PIL import Image
 import sqlite3
 from datetime import datetime
+from config import DATABASE_PATH
 
 logger = logging.getLogger(__name__)
 
 class ImageEvaluator:
     """Handles image evaluation using Google Gemini API with database tracking."""
 
-    def __init__(self, api_key: str, db_path: str = "image_generation.db"):
+    def __init__(self, api_key: str, db_path: str = DATABASE_PATH):
         self.api_key = api_key
         self.db_path = db_path
         
