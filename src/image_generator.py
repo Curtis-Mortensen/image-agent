@@ -4,44 +4,33 @@ from pathlib import Path
 from typing import Dict, Optional, Any, Tuple, Callable
 from PIL import Image
 import fal_client
+import base64 # Import the base64 module
 from datetime import datetime
-
-from src.image_evaluator import ImageEvaluator
-from src.prompt_refiner import PromptRefiner
-from src.prompt_handler import PromptHandler
+import os # Import the os module
 
 logger = logging.getLogger(__name__)
 
 class ImageGenerator:
     """Handles image generation, saving images directly to outputs/images."""
 
-    def __init__(self, fal_api_key: str, gemini_api_key: str, output_base_path: Path,
-                 batch_size: int = 3, prompt_handler: PromptHandler = None):
+    def __init__(self, fal_api_key: str, output_base_path: Path,
+                 batch_size: int = 3): # Removed gemini_api_key and prompt_handler
         """Initialize the image generator with API clients."""
         self.output_base_path = Path(output_base_path)
         self.batch_size = batch_size
-        self.prompt_handler = prompt_handler
 
         # Initialize API clients
         fal_client.api_key = fal_api_key
         from src.api_client import FalClient
         self.fal_client = FalClient(fal_api_key)
-        self.image_evaluator = ImageEvaluator(gemini_api_key)
-        self.prompt_refiner = PromptRefiner(gemini_api_key, self.output_base_path.parent, self.prompt_handler)
 
     async def setup(self):
         """Initialize resources."""
         await self.fal_client.setup()
-        await self.image_evaluator.setup()
-        await self.prompt_refiner.setup()
-        if self.prompt_refiner:
-            await self.prompt_refiner.setup()
 
     async def cleanup(self):
         """Cleanup resources."""
         await self.fal_client.cleanup()
-        await self.image_evaluator.cleanup()
-        await self.prompt_refiner.cleanup()
 
     def _construct_full_prompt(self, prompt_data: Dict) -> str:
         """Construct the full prompt from prompt data."""
@@ -53,99 +42,56 @@ class ImageGenerator:
         )
 
     async def process_prompt(self, prompt_id: str, prompt_data: dict,
-                           progress_callback: Callable[[str], None]) -> bool:
+                           iteration: int, progress_callback: Callable[[str], None]) -> Optional[Path]: # Added iteration
         """Process a single prompt through the generation pipeline."""
         try:
             def update_progress(message: str):
                 progress_callback(message)
 
-            # Generate and evaluate image
-            image_path, evaluation = await self.generate_and_evaluate(
+            # Generate image
+            image_path = await self.generate_image_iteration( # Renamed and simplified function
                 prompt_data,
                 prompt_id,
+                iteration=iteration,
                 progress_callback=update_progress
             )
 
             if not image_path:
-                return False
+                return None
 
-            # Save results - use PromptHandler instance
-            if self.prompt_handler:
-                await self.prompt_handler.save_results(
-                    prompt_id=prompt_id,
-                    iteration=2,  # Final iteration
-                    image_path=image_path,
-                    prompt=prompt_data['prompt'],
-                    evaluation=evaluation
-                )
-            else:
-                logger.error("PromptHandler not initialized in ImageGenerator. Cannot save results.")
-                return False
-
-            logger.info(f"Successfully completed processing for prompt {prompt_id}")
-            return True
+            logger.info(f"Successfully generated image for prompt {prompt_id}, iteration {iteration}")
+            return image_path
 
         except asyncio.CancelledError:
             logger.warning(f"Processing cancelled for prompt {prompt_id}")
             raise
         except Exception as e:
             logger.error(f"Error processing prompt {prompt_id}: {str(e)}", exc_info=True)
-            return False
+            return None
 
 
-    async def generate_and_evaluate(self, prompt_data: Dict, prompt_id: str,
-                                  progress_callback=None) -> Tuple[Optional[Path], Optional[Dict]]:
+    async def generate_image_iteration(self, prompt_data: Dict, prompt_id: str, iteration: int, progress_callback=None) -> Optional[Path]: # Renamed and simplified
         """
-        Complete generation process including evaluation and refinement.
+        Generate a single image iteration and return the image path.
         """
         try:
             # Initial generation
             if progress_callback:
-                progress_callback(f"Generating initial image for {prompt_id}")
+                progress_callback(f"Generating iteration {iteration} image for {prompt_id}")
 
             full_prompt = self._construct_full_prompt(prompt_data)
-            initial_image = await self.generate_image(
+            image_path = await self.generate_image(
                 full_prompt,
                 prompt_id,
-                iteration=1,
+                iteration=iteration,
                 model_id="fal-ai/fast-lightning-sdxl"
             )
-
-            if not initial_image:
-                return None, None
-
-            # Evaluate image
-            if progress_callback:
-                progress_callback(f"Evaluating image for {prompt_id}")
-
-            evaluation = await self.evaluate_image(initial_image)
-            if not evaluation:
-                return initial_image, None
-
-            # Refine prompt
-            if progress_callback:
-                progress_callback(f"Refining prompt for {prompt_id}")
-
-            refined_prompt = await self.refine_prompt(full_prompt, prompt_id, evaluation)
-            if not refined_prompt or "No refinement needed" in refined_prompt:
-                return initial_image, evaluation
-
-            # Generate refined version
-            if progress_callback:
-                progress_callback(f"Generating refined image for {prompt_id}")
-
-            refined_image = await self.generate_image(
-                refined_prompt,
-                prompt_id,
-                iteration=2,
-                model_id="fal-ai/fast-lightning-sdxl"
-            )
-
-            return refined_image or initial_image, evaluation
+            return image_path
 
         except Exception as e:
-            logger.error(f"Error in generation process: {str(e)}")
-            return None, None
+            logger.error(f"Error in generate_image_iteration: {str(e)}")
+            return None
+
 
     async def generate_image(self, prompt: str, prompt_id: str,
                            iteration: int = 1, **kwargs) -> Optional[Path]:
@@ -163,10 +109,17 @@ class ImageGenerator:
             # Save image data
             if 'images' in result and result['images']:
                 image_data = result['images'][0]  # Assuming first image
-                # Assuming image_data is base64 encoded, decode and save
-                binary_data = fal_client.base64.b64decode(image_data)
+                # Assuming image_data is a dictionary containing 'content' key with base64 string
+                binary_data = base64.b64decode(image_data.get('content', '')) # Access 'content' key, default to empty string if not found
                 with open(image_path, 'wb') as f:
                     f.write(binary_data)
+
+                if os.path.exists(image_path): # Check if file exists
+                    logger.info(f"Image saved successfully to: {image_path}")
+                else:
+                    logger.error(f"Error saving image to: {image_path}")
+                    return None # Return None if image was not saved
+
                 return image_path
 
             return None
@@ -175,21 +128,6 @@ class ImageGenerator:
             logger.error(f"Error generating image: {str(e)}")
             return None
 
-    async def evaluate_image(self, image_path: Path) -> Optional[Dict]:
-        """Evaluate an image using Gemini Vision."""
-        try:
-            return await self.image_evaluator.evaluate_image(Image.open(image_path))
-        except Exception as e:
-            logger.error(f"Error evaluating image: {str(e)}")
-            return None
-
-    async def refine_prompt(self, original_prompt: str, prompt_id: str, evaluation: Dict) -> Optional[str]:
-        """Refine a prompt based on evaluation."""
-        try:
-            return await self.prompt_refiner.refine_prompt(original_prompt, prompt_id, evaluation)
-        except Exception as e:
-            logger.error(f"Error refining prompt: {str(e)}")
-            return None
 
     async def __aenter__(self):
         """Async context manager entry."""
