@@ -1,12 +1,14 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Any, Tuple
+from typing import Dict, Optional, Any, Tuple, Callable
 from PIL import Image
 import fal_client
 from datetime import datetime
-import io
-import aiohttp  # Import aiohttp for downloading
+
+from src.image_evaluator import ImageEvaluator # Import ImageEvaluator
+from src.prompt_refiner import PromptRefiner   # Import PromptRefiner
+from src.prompt_handler import PromptHandler # Import PromptHandler - needed for save_results
 
 logger = logging.getLogger(__name__)
 
@@ -14,24 +16,30 @@ class ImageGenerator:
     """Handles the complete image generation process."""
 
     def __init__(self, fal_api_key: str, gemini_api_key: str, output_base_path: Path,
-                 batch_size: int = 3):
+                 batch_size: int = 3, prompt_handler: PromptHandler = None): # Add PromptHandler as dependency
         """Initialize the image generator with API clients."""
         self.output_base_path = Path(output_base_path)
         self.batch_size = batch_size
+        self.prompt_handler = prompt_handler # Store PromptHandler
 
         # Initialize API clients
         fal_client.api_key = fal_api_key
-        from src.api_client import FalClient, GeminiClient
+        from src.api_client import FalClient
         self.fal_client = FalClient(fal_api_key)
-        self.gemini_client = GeminiClient(gemini_api_key)
+        self.image_evaluator = ImageEvaluator(gemini_api_key) # Use ImageEvaluator
+        self.prompt_refiner = PromptRefiner(gemini_api_key)   # Use PromptRefiner
 
     async def setup(self):
         """Initialize resources."""
         await self.fal_client.setup()
+        await self.image_evaluator.setup() # Setup evaluator
+        await self.prompt_refiner.setup()   # Setup refiner
 
     async def cleanup(self):
         """Cleanup resources."""
         await self.fal_client.cleanup()
+        await self.image_evaluator.cleanup() # Cleanup evaluator
+        await self.prompt_refiner.cleanup()   # Cleanup refiner
 
     def _construct_full_prompt(self, prompt_data: Dict) -> str:
         """Construct the full prompt from prompt data."""
@@ -41,6 +49,47 @@ class ImageGenerator:
             f"Mood: {prompt_data['mood']}\n"
             f"Prompt: {prompt_data['prompt']}"
         )
+
+    async def process_prompt(self, prompt_id: str, prompt_data: dict,
+                           progress_callback: Callable[[str], None]) -> bool:
+        """Process a single prompt through the generation pipeline."""
+        try:
+            def update_progress(message: str):
+                progress_callback(message)
+
+            # Generate and evaluate image
+            image_path, evaluation = await self.generate_and_evaluate(
+                prompt_data,
+                prompt_id,
+                progress_callback=update_progress
+            )
+
+            if not image_path:
+                return False
+
+            # Save results - use PromptHandler instance
+            if self.prompt_handler:
+                await self.prompt_handler.save_results(
+                    prompt_id=prompt_id,
+                    iteration=2,  # Final iteration
+                    image_path=image_path,
+                    prompt=prompt_data['prompt'],
+                    evaluation=evaluation
+                )
+            else:
+                logger.error("PromptHandler not initialized in ImageGenerator. Cannot save results.")
+                return False
+
+            logger.info(f"Successfully completed processing for prompt {prompt_id}")
+            return True
+
+        except asyncio.CancelledError:
+            logger.warning(f"Processing cancelled for prompt {prompt_id}")
+            raise
+        except Exception as e:
+            logger.error(f"Error processing prompt {prompt_id}: {str(e)}", exc_info=True)
+            return False
+
 
     async def generate_and_evaluate(self, prompt_data: Dict, prompt_id: str,
                                   progress_callback=None) -> Tuple[Optional[Path], Optional[Dict]]:
@@ -119,29 +168,12 @@ class ImageGenerator:
 
             # Save image data
             if 'images' in result and result['images']:
-                image_info = result['images'][0]  # Assuming first image is an Image object
-                image_url = image_info.get('url') # Get image URL from Image object
-
-                if image_url:
-                    logger.debug(f"Image URL found: {image_url}")
-                    try:
-                        async with aiohttp.ClientSession() as session: # Create aiohttp session
-                            async with session.get(image_url) as resp: # Download image data from URL
-                                if resp.status == 200:
-                                    image_bytes = await resp.read() # Read image bytes
-                                    pil_image = Image.open(io.BytesIO(image_bytes)) # Open image with PIL
-                                    pil_image.save(image_path) # Save image to file
-                                    logger.debug(f"Saving image to path: {image_path}")
-                                    return image_path
-                                else:
-                                    logger.error(f"Failed to download image from {image_url}, status: {resp.status}")
-                                    return None
-                    except Exception as download_error:
-                        logger.error(f"Error downloading or saving image: {download_error}")
-                        return None
-                else:
-                    logger.error("Image URL not found in API response")
-                    return None
+                image_data = result['images'][0]  # Assuming first image
+                # Assuming image_data is base64 encoded, decode and save
+                binary_data = fal_client.base64.b64decode(image_data)
+                with open(image_path, 'wb') as f: # Image saving is here and correct
+                    f.write(binary_data)
+                return image_path
 
             return None
 
@@ -152,11 +184,7 @@ class ImageGenerator:
     async def evaluate_image(self, image_path: Path) -> Optional[Dict]:
         """Evaluate an image using Gemini Vision."""
         try:
-            logger.debug(f"Evaluating image at path: {image_path}")
-            return await self.gemini_client.evaluate_image(Image.open(image_path))
-        except FileNotFoundError as e:
-            logger.error(f"Error evaluating image: {e}") # More specific error message
-            return None
+            return await self.image_evaluator.evaluate_image(Image.open(image_path)) # Use ImageEvaluator
         except Exception as e:
             logger.error(f"Error evaluating image: {str(e)}")
             return None
@@ -164,7 +192,7 @@ class ImageGenerator:
     async def refine_prompt(self, original_prompt: str, evaluation: Dict) -> Optional[str]:
         """Refine a prompt based on evaluation."""
         try:
-            return await self.gemini_client.refine_prompt(original_prompt, evaluation)
+            return await self.prompt_refiner.refine_prompt(original_prompt, evaluation) # Use PromptRefiner
         except Exception as e:
             logger.error(f"Error refining prompt: {str(e)}")
             return None

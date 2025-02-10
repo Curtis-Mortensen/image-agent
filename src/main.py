@@ -13,8 +13,8 @@ from PIL import Image
 from concurrent.futures import ProcessPoolExecutor # Explicitly import ProcessPoolExecutor
 import aiofiles # Import aiofiles for async file operations
 
-from src.image_generator import ImageGenerator
-from src.prompt_handler import PromptHandler
+from src.image_generator import ImageGenerator # Import ImageGenerator
+from src.prompt_handler import PromptHandler # Import PromptHandler
 from src.image_evaluator import ImageEvaluator
 from src.prompt_refiner import PromptRefiner
 from config import FAL_KEY, GEMINI_API_KEY, INPUT_FILE_PATH, OUTPUT_BASE_PATH
@@ -34,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class ImageGenerationPipeline:
-    """Orchestrates the image generation pipeline with progress tracking."""
+    """Orchestrates the image generation pipeline."""
 
     def __init__(self, input_file_path: Path, output_base_path: Path,
                  fal_api_key: str, gemini_api_key: str):
@@ -43,7 +43,8 @@ class ImageGenerationPipeline:
         self.image_generator = ImageGenerator(
             fal_api_key=fal_api_key,
             gemini_api_key=gemini_api_key,
-            output_base_path=output_base_path
+            output_base_path=output_base_path,
+            prompt_handler=self.prompt_handler # Pass PromptHandler instance
         )
         self.running = True
         self.tasks: List[asyncio.Task] = []
@@ -75,29 +76,12 @@ class ImageGenerationPipeline:
         try:
             def update_progress(message: str):
                 self.progress.update(progress_task, description=message)
-
-            # Generate and evaluate image
-            image_path, evaluation = await self.image_generator.generate_and_evaluate(
-                prompt_data,
+            # Delegate prompt processing to ImageGenerator
+            return await self.image_generator.process_prompt(
                 prompt_id,
-                progress_callback=update_progress
+                prompt_data,
+                update_progress # Pass the progress update callback
             )
-
-            if not image_path:
-                return False
-
-            # Save results
-            await self.prompt_handler.save_results(
-                prompt_id=prompt_id,
-                iteration=2,  # Final iteration
-                image_path=image_path,
-                prompt=prompt_data['prompt'],
-                evaluation=evaluation
-            )
-
-            self.progress.update(progress_task, advance=1)
-            logger.info(f"Successfully completed processing for prompt {prompt_id}")
-            return True
 
         except asyncio.CancelledError:
             logger.warning(f"Processing cancelled for prompt {prompt_id}")
@@ -130,8 +114,8 @@ class ImageGenerationPipeline:
         successful = sum(1 for r in results if r is True)
         logger.info(f"Batch completed: {successful}/{len(results)} successful")
 
-    async def run_pipeline(self) -> None: # Renamed from run to run_pipeline
-        """Run the complete pipeline."""
+    async def run_image_generation(self) -> None: # Renamed from run_pipeline to run_image_generation
+        """Run the complete image generation."""
         try:
             async with self.prompt_handler, self.image_generator:
                 prompts = await self.prompt_handler.load_prompts()
@@ -140,7 +124,7 @@ class ImageGenerationPipeline:
                     return
 
                 total_prompts = len(prompts)
-                logger.info(f"Starting processing of {total_prompts} prompts")
+                logger.info(f"Starting Image Generation for {total_prompts} prompts") # Updated log message
 
                 # Directly process all prompts without batching for now, to ensure all are processed
                 for prompt_id, prompt_data in prompts.items():
@@ -149,12 +133,12 @@ class ImageGenerationPipeline:
                     logger.info(f"Processing prompt: {prompt_id}")
                     await self.process_prompt(prompt_id, prompt_data, self.progress.add_task(f"Prompt {prompt_id}", total=2)) # Assuming 2 iterations per prompt
 
-                logger.info("Pipeline completed successfully")
+                logger.info("Image Generation completed successfully") # Updated log message
 
         except asyncio.CancelledError:
-            logger.info("Pipeline cancelled - starting cleanup")
+            logger.info("Image Generation cancelled - starting cleanup") # Updated log message
         except Exception as e:
-            logger.error(f"Pipeline failed: {str(e)}", exc_info=True)
+            logger.error(f"Image Generation failed: {str(e)}", exc_info=True) # Updated log message
         finally:
             self.process_pool.shutdown(wait=True)
 
@@ -167,7 +151,7 @@ async def generate_images_command():
         fal_api_key=FAL_KEY,
         gemini_api_key=GEMINI_API_KEY
     )
-    await pipeline.run_pipeline() # Use run_pipeline here
+    await pipeline.run_image_generation() # Use run_image_generation here
 
 async def evaluate_image_command():
     """Evaluates a single image using Gemini API, suggesting a default path and saving results."""
@@ -223,7 +207,7 @@ async def main_menu():
     """Displays the main menu and handles user input."""
     while True:
         print("\nChoose an action:")
-        print("1. Run Full Image Generation Pipeline") # Option to run full pipeline
+        print("1. Run Image Generation") # Option to run full pipeline
         print("2. Evaluate an Existing Image")
         print("3. Refine a Prompt based on Evaluation")
         print("4. Exit")
