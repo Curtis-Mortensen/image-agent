@@ -19,6 +19,7 @@ class PromptData:
     scene: str
     mood: str
     prompt: str
+    model: str = "flux"  # Default to flux if not specified
 
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> 'PromptData':
@@ -30,6 +31,7 @@ class PromptHandler:
     PROMPT_SCHEMA = {
         "type": "object",
         "properties": {
+            "model": {"type": "string"},
             "prompts": {
                 "type": "array",
                 "items": {
@@ -39,7 +41,8 @@ class PromptHandler:
                         "title": {"type": "string"},
                         "scene": {"type": "string"},
                         "mood": {"type": "string"},
-                        "prompt": {"type": "string"}
+                        "prompt": {"type": "string"},
+                        "model": {"type": "string"}
                     },
                     "required": ["id", "title", "scene", "mood", "prompt"]
                 }
@@ -54,41 +57,11 @@ class PromptHandler:
         self.output_base_path = Path(output_base_path)
         self.db_path = db_path
         self.prompts_cache: Dict[str, PromptData] = {}
-        self._init_db()
 
     def _init_db(self):
         """Initialize database tables."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.executescript("""
-                CREATE TABLE IF NOT EXISTS prompts (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    scene TEXT NOT NULL,
-                    mood TEXT NOT NULL,
-                    prompt TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE TABLE IF NOT EXISTS iterations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    prompt_id TEXT NOT NULL,
-                    iteration INTEGER NOT NULL,
-                    image_path TEXT,
-                    evaluation_text TEXT,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    status TEXT DEFAULT 'pending',
-                    FOREIGN KEY (prompt_id) REFERENCES prompts(id),
-                    UNIQUE(prompt_id, iteration)
-                );
-
-                CREATE TABLE IF NOT EXISTS prompt_status (
-                    prompt_id TEXT PRIMARY KEY,
-                    current_iteration INTEGER DEFAULT 0,
-                    status TEXT DEFAULT 'pending',
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (prompt_id) REFERENCES prompts(id)
-                );
-            """)
+        # Database initialization is now handled by DatabaseGenerator
+        pass
 
     async def setup(self):
         """Create necessary directories."""
@@ -105,17 +78,24 @@ class PromptHandler:
                 data = json.load(f)
 
             validate(instance=data, schema=self.PROMPT_SCHEMA)
+            
+            # Get default model from file
+            default_model = data.get("model", "flux")
 
             # Store prompts in database
             with sqlite3.connect(self.db_path) as conn:
                 for prompt_data in data['prompts']:
+                    # Ensure model is set
+                    if "model" not in prompt_data:
+                        prompt_data["model"] = default_model
+                        
                     prompt_obj = PromptData.from_dict(prompt_data)
                     conn.execute("""
                         INSERT OR REPLACE INTO prompts 
-                        (id, title, scene, mood, prompt)
-                        VALUES (?, ?, ?, ?, ?)
+                        (id, title, scene, mood, prompt, model)
+                        VALUES (?, ?, ?, ?, ?, ?)
                     """, (prompt_obj.id, prompt_obj.title, prompt_obj.scene,
-                          prompt_obj.mood, prompt_obj.prompt))
+                          prompt_obj.mood, prompt_obj.prompt, prompt_obj.model))
                     
                     # Initialize status
                     conn.execute("""
